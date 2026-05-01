@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-heading;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-text shadow-sm transition hover:bg-accent-dark focus:outline-none focus:ring-2 focus:ring-accent/40 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-text shadow-sm transition hover:border-primary/40 hover:bg-primary-soft/30 focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .input {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-text placeholder:text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-text;
+  }
+  .card {
+    @apply rounded-xl border border-slate-200 bg-surface p-6 shadow-md;
+  }
+  .brand-mark {
+    @apply font-heading text-2xl font-bold tracking-tight text-primary;
+  }
+  .brand-mark-light {
+    @apply font-heading text-2xl font-bold tracking-tight text-white;
+  }
+  /* Techment-inspired blue hero panel — used on auth + marketing surfaces */
+  .hero-blue {
+    @apply relative overflow-hidden bg-hero-gradient text-white;
+  }
+  .hero-blue::before {
+    content: '';
+    @apply pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl;
+  }
+  .hero-blue::after {
+    content: '';
+    @apply pointer-events-none absolute -bottom-32 -left-16 h-80 w-80 rounded-full bg-white/5 blur-3xl;
+  }
+  .hero-blue-eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.18em] text-white/70;
+  }
+  .hero-blue-headline {
+    @apply font-heading text-4xl font-bold leading-tight text-white lg:text-5xl;
+  }
+  .hero-blue-body {
+    @apply text-base leading-relaxed text-white/85;
+  }
+}
