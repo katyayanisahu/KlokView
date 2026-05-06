@@ -49,3 +49,25 @@ export interface MarkImportedPayload {
 export async function markOutlookEventImported(payload: MarkImportedPayload): Promise<void> {
   await api.post('/integrations/outlook/events/mark-imported/', payload);
 }
+
+// ----- Jira (Epic 7) -----
+
+export interface JiraStatus {
+  connected: boolean;
+  base_url: string | null;
+  connected_at: string | null;
+}
+
+export async function getJiraStatus(): Promise<JiraStatus> {
+  const { data } = await api.get<JiraStatus>('/integrations/jira/status/');
+  return data;
+}
+
+export async function claimJiraConnection(client_key: string): Promise<JiraStatus> {
+  const { data } = await api.post<JiraStatus>('/integrations/jira/claim/', { client_key });
+  return data;
+}
+
+export async function disconnectJira(): Promise<void> {
+  await api.delete('/integrations/jira/disconnect/');
+}

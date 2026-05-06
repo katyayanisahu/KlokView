@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   Briefcase,
   ChevronDown,
+  DollarSign,
+  Lock,
   RotateCcw,
   Shield,
   Trash2,
@@ -81,6 +83,8 @@ export default function EditTeamMemberPage() {
   const [permission, setPermission] = useState<InviteRole>('member');
   const [selectedJobRoleIds, setSelectedJobRoleIds] = useState<number[]>([]);
   const [rolesOpen, setRolesOpen] = useState(false);
+  const [hourlyRate, setHourlyRate] = useState('');
+  const [costRate, setCostRate] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -103,6 +107,8 @@ export default function EditTeamMemberPage() {
         setEmail(m.email);
         setEmployeeId(m.employee_id || '');
         setCapacity(String(m.weekly_capacity_hours ?? '35'));
+        setHourlyRate(m.hourly_rate != null ? String(m.hourly_rate) : '');
+        setCostRate(m.cost_rate != null ? String(m.cost_rate) : '');
         setSelectedJobRoleIds(m.job_role_ids ?? []);
         setPermission(
           (m.role === 'owner' ? 'admin' : (m.role as InviteRole)) ?? 'member',
@@ -125,6 +131,7 @@ export default function EditTeamMemberPage() {
   const canEditPermission = !isOwnerTarget;
   const canArchive = !isOwnerTarget && !isCurrentUser;
   const canDelete = currentUser?.role === 'owner' && !isOwnerTarget && !isCurrentUser;
+  const canEditRates = currentUser?.role === 'owner' || currentUser?.role === 'admin';
 
   const selectedRoleNames = useMemo(
     () => jobRoles.filter((jr) => selectedJobRoleIds.includes(jr.id)).map((jr) => jr.name),
@@ -161,6 +168,23 @@ export default function EditTeamMemberPage() {
     }
     setSaving(true);
     try {
+      const ratePayload: { hourly_rate?: number; cost_rate?: number } = {};
+      if (canEditRates) {
+        const parsedHourly = hourlyRate.trim() === '' ? 0 : Number.parseFloat(hourlyRate);
+        const parsedCost = costRate.trim() === '' ? 0 : Number.parseFloat(costRate);
+        if (Number.isNaN(parsedHourly) || parsedHourly < 0) {
+          setServerError('Billable rate must be a non-negative number.');
+          setSaving(false);
+          return;
+        }
+        if (Number.isNaN(parsedCost) || parsedCost < 0) {
+          setServerError('Cost rate must be a non-negative number.');
+          setSaving(false);
+          return;
+        }
+        ratePayload.hourly_rate = parsedHourly;
+        ratePayload.cost_rate = parsedCost;
+      }
       const updated = await updateTeamMember(member.id, {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
@@ -169,6 +193,7 @@ export default function EditTeamMemberPage() {
         weekly_capacity_hours: Number.parseFloat(capacity),
         job_role_ids: selectedJobRoleIds,
         ...(canEditPermission ? { role: permission } : {}),
+        ...ratePayload,
       });
       setMember(updated);
       setSuccessFlash('Changes saved.');
@@ -518,6 +543,66 @@ export default function EditTeamMemberPage() {
               </div>
             )}
           </section>
+
+          {/* Rates — admin/owner only */}
+          {canEditRates ? (
+            <section className="card">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-heading text-lg font-bold text-text">Rates</h2>
+                  <p className="mt-1 text-sm text-muted">
+                    Used by the Profitability report to compute revenue and cost.
+                  </p>
+                </div>
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft px-2.5 py-1 text-[11px] font-semibold text-primary">
+                  <Lock className="h-3 w-3" />
+                  Admin &amp; Owner only
+                </span>
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="hourly_rate" className="label">Default billable rate</label>
+                  <div className="relative">
+                    <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                    <input
+                      id="hourly_rate"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={hourlyRate}
+                      onChange={(e) => setHourlyRate(e.target.value)}
+                      className="input pl-9"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-muted">
+                    What clients are charged per hour for this person, by default.
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="cost_rate" className="label">Cost rate</label>
+                  <div className="relative">
+                    <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                    <input
+                      id="cost_rate"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={costRate}
+                      onChange={(e) => setCostRate(e.target.value)}
+                      className="input pl-9"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-muted">
+                    What you pay this person per hour. Drives the Cost column in reports.
+                  </p>
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           {/* Project memberships */}
           <section className="card">

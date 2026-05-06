@@ -88,6 +88,10 @@ class TimeEntry(models.Model):
     notes = models.TextField(blank=True, default='')
     is_billable = models.BooleanField(default=True)
 
+    # Optional Jira issue this entry is logged against (e.g. "PROJ-123").
+    # Used by the Jira Forge App + Time-page tagging — see Docs/Jira_Integration_v2_Django.
+    jira_issue_key = models.CharField(max_length=50, blank=True, default='')
+
     is_running = models.BooleanField(default=False)
     started_at = models.DateTimeField(null=True, blank=True)
 
@@ -100,6 +104,7 @@ class TimeEntry(models.Model):
         indexes = [
             models.Index(fields=['account', 'user', 'date']),
             models.Index(fields=['account', 'project', 'date']),
+            models.Index(fields=['account', 'jira_issue_key']),
         ]
 
     def __str__(self) -> str:

@@ -9,7 +9,7 @@ urlpatterns = [
     path('api/v1/', include('apps.projects.urls')),
     path('api/v1/', include('apps.timesheets.urls')),
     path('api/v1/integrations/', include('apps.integrations.urls')),
+    path('api/v1/reports/', include('apps.reports.urls')),
     # Placeholders for later phases:
-    # path('api/v1/reports/', include('apps.reports.urls')),
     # path('api/v1/invoices/', include('apps.invoices.urls')),
 ]

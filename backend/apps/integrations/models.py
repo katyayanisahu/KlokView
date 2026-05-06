@@ -72,6 +72,62 @@ class OutlookConnection(models.Model):
         self.refresh_token_encrypted = encrypt(value)
 
 
+class JiraConnection(models.Model):
+    """One Jira Cloud site per TrackFlow account.
+
+    Atlassian's Connect/Forge install lifecycle posts a `clientKey` and
+    `sharedSecret` when the app is installed on a Jira site; we store both
+    here. Inbound requests from the Forge panel arrive with a JWT signed by
+    that secret, which `JiraJWTAuthentication` verifies.
+
+    The `account` field is nullable because the Atlassian lifecycle webhook
+    (POST /installed/) fires before any TrackFlow user has linked the Jira
+    site. We persist the connection row first; a TrackFlow admin then claims
+    it from Settings → Integrations, which sets `account_id`.
+    """
+
+    account = models.ForeignKey(
+        'accounts.Account', on_delete=models.CASCADE,
+        related_name='jira_connections',
+        null=True, blank=True,
+    )
+    # The TrackFlow user whose name is used when entries are logged from
+    # the Jira side. Auto-set to the workspace's first owner/admin during
+    # the Forge bootstrap call; can be changed later from Settings.
+    default_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='jira_default_for_connections',
+    )
+    # Atlassian-issued identifiers from the install handshake.
+    client_key = models.CharField(max_length=255, unique=True)
+    base_url = models.URLField(max_length=512)
+    product_type = models.CharField(max_length=50, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    shared_secret_encrypted = models.TextField(blank=True, default='')
+
+    connected_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'jira_connections'
+        indexes = [
+            models.Index(fields=['account']),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.client_key} → {self.base_url}'
+
+    @property
+    def shared_secret(self) -> str:
+        return decrypt(self.shared_secret_encrypted)
+
+    @shared_secret.setter
+    def shared_secret(self, value: str) -> None:
+        self.shared_secret_encrypted = encrypt(value)
+
+
 class ImportedCalendarEvent(models.Model):
     """Tracks which Outlook calendar events have already been pulled into
     TrackFlow as time entries — so the picker can gray them out and prevent

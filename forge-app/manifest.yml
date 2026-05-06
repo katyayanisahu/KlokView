@@ -1,0 +1,46 @@
+# KlokView Jira Forge App — manifest (UI Kit 2 / @forge/react)
+#
+# Registers a "KlokView Time Tracking" panel inside every Jira issue.
+# The panel renders with @forge/react on the client; data fetching happens
+# server-side via the resolver function in src/resolvers/index.js, which
+# calls the KlokView Django backend (apps/integrations/jira_views.py).
+#
+# Workflow:
+#   Local dev:   forge tunnel    (rewrites api.klokview.dev → localhost:8000)
+#   Production:  forge deploy && forge install --site <yoursite>.atlassian.net
+
+modules:
+  jira:issuePanel:
+    - key: klokview-time-tracking-panel
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: KlokView Time Tracking
+      icon: https://developer.atlassian.com/platform/forge/images/icons/issue-panel-icon.svg
+  function:
+    - key: resolver
+      handler: resolvers.handler
+
+resources:
+  - key: main
+    path: src/index.jsx
+
+app:
+  id: ari:cloud:ecosystem::app/26b4d13e-82a2-4e4c-a93f-34cddfdab857
+  runtime:
+    name: nodejs22.x
+
+permissions:
+  # Forge external fetch must be HTTPS. For local dev, `forge tunnel`
+  # rewrites this URL → http://localhost:8000 transparently. Replace with
+  # your real production URL when deploying.
+  external:
+    fetch:
+      backend:
+        # Dev URL — `npx localtunnel --port 8000` gives a fresh https URL each
+        # restart. Update both this list and src/resolvers.js when it changes.
+        - https://mailing-closing-until-district.trycloudflare.com
+  scopes:
+    - read:jira-work
+    - read:jira-user

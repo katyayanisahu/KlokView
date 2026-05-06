@@ -45,6 +45,9 @@ class TimeEntrySerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source='project.client.name', read_only=True)
     task_name = serializers.CharField(source='project_task.task.name', read_only=True)
     hours = serializers.CharField(required=False)
+    jira_issue_key = serializers.CharField(
+        required=False, allow_blank=True, max_length=50,
+    )
 
     class Meta:
         model = TimeEntry
@@ -54,6 +57,7 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             'project_id', 'project_name', 'client_name',
             'project_task_id', 'task_name',
             'date', 'hours', 'notes', 'is_billable',
+            'jira_issue_key',
             'is_running', 'started_at',
             'created_at', 'updated_at',
         )
@@ -87,6 +91,10 @@ class TimeEntrySerializer(serializers.ModelSerializer):
                     {'hours': 'A single entry cannot exceed 24 hours.'},
                 )
             attrs['hours'] = hours
+
+        # Normalize Jira issue key — uppercase + strip, so "proj-123 " == "PROJ-123".
+        if 'jira_issue_key' in attrs:
+            attrs['jira_issue_key'] = (attrs.get('jira_issue_key') or '').strip().upper()
 
         return attrs
 

@@ -2,7 +2,7 @@ import {
   Archive,
   ArrowLeft,
   BarChart3,
-  Check,
+  ChevronRight,
   Copy,
   Download,
   MoreHorizontal,
@@ -13,7 +13,7 @@ import {
   TrendingUp,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { useConfirm } from '@/components/ConfirmDialog';
@@ -30,6 +30,7 @@ import {
   restoreProject,
   updateProject,
 } from '@/api/projects';
+import { getTimeReport, type TaskBreakdownRow } from '@/api/reports';
 import { listUsers } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 import { extractApiError } from '@/utils/errors';
@@ -893,10 +894,39 @@ function TasksPanel({
 }) {
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [adding, setAdding] = useState<number | ''>('');
+  const [breakdown, setBreakdown] = useState<TaskBreakdownRow[]>([]);
+  const [breakdownLoading, setBreakdownLoading] = useState(true);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     listTasks({ is_active: true }).then((r) => setAllTasks(r.results));
   }, []);
+
+  // Pull task→members breakdown from the Time report API (with cost included).
+  useEffect(() => {
+    let cancelled = false;
+    setBreakdownLoading(true);
+    getTimeReport({ project_id: project.id })
+      .then((data) => {
+        if (!cancelled) setBreakdown(data.task_breakdown ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setBreakdown([]);
+      })
+      .finally(() => {
+        if (!cancelled) setBreakdownLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Re-fetch when the project's task list changes (so newly added/removed tasks appear).
+  }, [project.id, project.project_tasks.length]);
+
+  const breakdownByName = useMemo(() => {
+    const map = new Map<string, TaskBreakdownRow>();
+    breakdown.forEach((b) => map.set(b.name, b));
+    return map;
+  }, [breakdown]);
 
   const assignedIds = useMemo(
     () => new Set(project.project_tasks.map((pt) => allTasks.find((t) => t.name === pt.task_name)?.id).filter(Boolean) as number[]),
@@ -920,56 +950,220 @@ function TasksPanel({
     onChange();
   };
 
+  const toggleExpand = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Build a unified row list — every project_task gets a row, with breakdown
+  // data merged in when present.
+  type Row = {
+    projectTaskId: number;
+    taskId?: number;
+    name: string;
+    isBillable: boolean;
+    hours: number;
+    billableAmount: number;
+    cost: number;
+    members: TaskBreakdownRow['members'];
+  };
+  const rows: Row[] = project.project_tasks.map((pt) => {
+    const tid = allTasks.find((t) => t.name === pt.task_name)?.id;
+    const bd = breakdownByName.get(pt.task_name);
+    return {
+      projectTaskId: pt.id,
+      taskId: tid,
+      name: pt.task_name,
+      isBillable: pt.is_billable,
+      hours: Number.parseFloat(bd?.hours ?? pt.hours_logged ?? '0') || 0,
+      billableAmount: Number.parseFloat(bd?.billable_amount ?? '0') || 0,
+      cost: Number.parseFloat(bd?.cost ?? '0') || 0,
+      members: bd?.members ?? [],
+    };
+  });
+
+  const totals = rows.reduce(
+    (acc, r) => ({
+      hours: acc.hours + r.hours,
+      billableAmount: acc.billableAmount + r.billableAmount,
+      cost: acc.cost + r.cost,
+    }),
+    { hours: 0, billableAmount: 0, cost: 0 },
+  );
+
   return (
     <div className="card p-0">
       <div className="overflow-x-auto">
-        <div className="min-w-[560px]">
-      <div className="grid grid-cols-[1fr_120px_120px_80px] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted">
-        <div>Task</div>
-        <div className="text-right">Hours</div>
-        <div className="text-center">Billable</div>
-        <div className="text-right">Action</div>
-      </div>
-      {project.project_tasks.length === 0 ? (
-        <div className="px-6 py-10 text-center text-sm text-muted">No tasks assigned yet.</div>
-      ) : (
-        project.project_tasks.map((pt) => {
-          const taskId = allTasks.find((t) => t.name === pt.task_name)?.id;
-          return (
-            <div
-              key={pt.id}
-              className="grid grid-cols-[1fr_120px_120px_80px] items-center gap-4 border-b border-slate-100 px-6 py-3 text-sm last:border-b-0"
-            >
-              <div className="text-text">{pt.task_name}</div>
-              <div className="text-right tabular-nums text-text">
-                {Number.parseFloat(pt.hours_logged ?? '0').toFixed(2)} hr
-              </div>
-              <div className="flex justify-center">
-                {pt.is_billable ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-0.5 text-xs font-medium text-accent-dark">
-                    <Check className="h-3 w-3" /> Billable
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted">Non-billable</span>
-                )}
-              </div>
-              <div className="flex justify-end">
-                {canEdit && taskId ? (
-                  <button
-                    type="button"
-                    onClick={() => handleRemove(taskId)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-danger/10 hover:text-danger"
-                    title="Remove task"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          );
-        })
-      )}
-        </div>
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-muted">
+              <th className="w-10 px-3 py-2.5" />
+              <th className="px-4 py-2.5">Billable tasks</th>
+              <th className="px-4 py-2.5 text-right">Hours</th>
+              <th className="px-4 py-2.5 text-right">Billable amount</th>
+              <th className="px-4 py-2.5 text-right">Costs</th>
+              <th className="px-4 py-2.5 text-center">Billable</th>
+              <th className="w-12 px-4 py-2.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {breakdownLoading && rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-6 py-10 text-center text-sm text-muted">
+                  Loading…
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-6 py-10 text-center text-sm text-muted">
+                  No tasks assigned yet.
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => {
+                const isOpen = expanded.has(row.projectTaskId);
+                const hasMembers = row.members.length > 0;
+                const detailedHref = row.taskId
+                  ? `/reports/detailed-time?project_id=${project.id}&task_id=${row.taskId}`
+                  : `/reports/detailed-time?project_id=${project.id}`;
+                return (
+                  <Fragment key={row.projectTaskId}>
+                    <tr
+                      className={`border-b border-slate-100 ${
+                        isOpen ? 'bg-primary-soft/30' : 'hover:bg-bg/60'
+                      }`}
+                    >
+                      <td className="px-3 py-3">
+                        {hasMembers ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleExpand(row.projectTaskId)}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-slate-100 hover:text-text"
+                            aria-label={isOpen ? 'Collapse' : 'Expand'}
+                          >
+                            <ChevronRight
+                              className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                            />
+                          </button>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="flex items-center gap-2.5">
+                          <span className="inline-block h-3 w-3 rounded-sm bg-accent" />
+                          <span className="font-semibold text-text">{row.name}</span>
+                          {!row.isBillable ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                              Non-billable
+                            </span>
+                          ) : null}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        <Link
+                          to={detailedHref}
+                          className="font-semibold text-primary hover:underline"
+                        >
+                          {row.hours.toFixed(2)}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums text-text">
+                        ${row.billableAmount.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-text">
+                        ${row.cost.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {row.isBillable ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-0.5 text-xs font-medium text-accent-dark">
+                            Billable
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {canEdit && row.taskId ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRemove(row.taskId!)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-danger/10 hover:text-danger"
+                            title="Remove task"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                    {isOpen
+                      ? row.members.map((m) => (
+                          <tr
+                            key={`${row.projectTaskId}-${m.user_id}`}
+                            className="border-b border-slate-50 bg-bg/30"
+                          >
+                            <td className="px-3 py-2.5" />
+                            <td className="px-4 py-2.5 pl-10">
+                              <span className="flex items-center gap-2.5">
+                                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary-soft text-xs font-bold text-primary">
+                                  {m.initials}
+                                </span>
+                                <span className="font-medium text-text">{m.name}</span>
+                                {m.role ? (
+                                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                                    {m.role}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums">
+                              <Link
+                                to={
+                                  row.taskId
+                                    ? `/reports/detailed-time?project_id=${project.id}&task_id=${row.taskId}&user_id=${m.user_id}`
+                                    : `/reports/detailed-time?project_id=${project.id}&user_id=${m.user_id}`
+                                }
+                                className="font-semibold text-primary hover:underline"
+                              >
+                                {Number.parseFloat(m.hours).toFixed(2)}
+                              </Link>
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-text">
+                              ${Number.parseFloat(m.billable_amount || '0').toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-text">
+                              ${Number.parseFloat(m.cost || '0').toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2.5" />
+                            <td className="px-4 py-2.5" />
+                          </tr>
+                        ))
+                      : null}
+                  </Fragment>
+                );
+              })
+            )}
+            {rows.length > 0 ? (
+              <tr className="bg-bg/40 font-semibold">
+                <td className="px-3 py-3" />
+                <td className="px-4 py-3 text-text">Total</td>
+                <td className="px-4 py-3 text-right tabular-nums text-text">
+                  {totals.hours.toFixed(2)}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-text">
+                  ${totals.billableAmount.toFixed(2)}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-text">
+                  ${totals.cost.toFixed(2)}
+                </td>
+                <td className="px-4 py-3" />
+                <td className="px-4 py-3" />
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
       {canEdit ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 bg-slate-50/50 px-4 py-3 sm:px-6">

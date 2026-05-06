@@ -45,6 +45,12 @@ class Project(models.Model):
         ADMINS_AND_MANAGERS = 'admins_and_managers', 'Admins and managers only'
         EVERYONE = 'everyone', 'Everyone on project'
 
+    class BillableRateStrategy(models.TextChoices):
+        PERSON = 'person', 'Person billable rate'
+        TASK = 'task', 'Task billable rate'
+        PROJECT = 'project', 'Project billable rate'
+        NONE = 'none', 'None / non-billable'
+
     account = models.ForeignKey(
         'accounts.Account', on_delete=models.CASCADE, related_name='projects',
     )
@@ -71,6 +77,16 @@ class Project(models.Model):
     budget_includes_non_billable = models.BooleanField(default=False)
     budget_alert_percent = models.PositiveSmallIntegerField(null=True, blank=True)
 
+    billable_rate_strategy = models.CharField(
+        max_length=10, choices=BillableRateStrategy.choices,
+        default=BillableRateStrategy.PERSON,
+        help_text='How billable revenue is computed for this project.',
+    )
+    flat_billable_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text='Single billable rate applied when billable_rate_strategy=project. NULL otherwise.',
+    )
+
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -94,6 +110,10 @@ class ProjectTask(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='project_tasks')
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='project_tasks')
     is_billable = models.BooleanField(default=True)
+    billable_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text='Per-project override for this task. NULL = fall back to Task.default_billable_rate.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

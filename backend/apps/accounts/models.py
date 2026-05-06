@@ -67,6 +67,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     role = models.CharField(max_length=10, choices=Role.choices, default=Role.OWNER)
     avatar_url = models.URLField(blank=True, default='')
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cost_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Cost rate for this user (what we pay per hour). Used in Profitability reports.",
+    )
 
     employee_id = models.CharField(
         max_length=100, blank=True, default='',

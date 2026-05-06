@@ -975,7 +975,11 @@ function ProjectRow({
           </div>
 
           {/* Metrics grid */}
-          <div className="mt-2.5 grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
+          <div
+            className={`mt-2.5 grid grid-cols-1 gap-x-6 gap-y-1 text-xs ${
+              canEdit ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
+            }`}
+          >
             <Metric
               label="Budget"
               value={project.budget_type === 'none' ? '—' : budget}
@@ -1002,6 +1006,12 @@ function ProjectRow({
               }
               tone={overBudget ? 'danger' : 'default'}
             />
+            {canEdit ? (
+              <Metric
+                label="Costs"
+                value={`$${Number.parseFloat(project.cost_amount ?? '0').toFixed(2)}`}
+              />
+            ) : null}
           </div>
 
           {/* Progress bar — full width below metrics */}

@@ -44,6 +44,7 @@ import {
   deleteTimeEntry,
   getRunningEntry,
   listTimeEntries,
+  resumeTimer,
   startTimer,
   stopTimer,
   updateTimeEntry,
@@ -883,6 +884,14 @@ function EntryRow({
               Non-billable
             </span>
           )}
+          {entry.jira_issue_key ? (
+            <span
+              className="rounded-full bg-primary-soft px-2 py-0.5 font-mono text-xs font-semibold text-primary"
+              title={`Jira issue ${entry.jira_issue_key}`}
+            >
+              {entry.jira_issue_key}
+            </span>
+          ) : null}
         </div>
         <p className="mt-1 text-sm font-medium text-text/70">{entry.task_name}</p>
         {entry.notes ? <p className="mt-1 text-sm text-text">{entry.notes}</p> : null}
@@ -1098,6 +1107,7 @@ export default function DashboardPage() {
   const [projectTaskId, setProjectTaskId] = useState<number | ''>('');
   const [hoursInput, setHoursInput] = useState('');
   const [notesInput, setNotesInput] = useState('');
+  const [jiraKeyInput, setJiraKeyInput] = useState('');
   const [billable, setBillable] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -1386,6 +1396,7 @@ export default function DashboardPage() {
     setProjectTaskId('');
     setHoursInput('');
     setNotesInput('');
+    setJiraKeyInput('');
     setBillable(true);
     setFormError(null);
     setEditingId(null);
@@ -1415,6 +1426,7 @@ export default function DashboardPage() {
           hours: hoursInput.trim(),
           notes: notesInput.trim(),
           is_billable: billable,
+          jira_issue_key: jiraKeyInput.trim(),
         });
       } else {
         const created = await createTimeEntry({
@@ -1424,6 +1436,7 @@ export default function DashboardPage() {
           hours: hoursInput.trim(),
           notes: notesInput.trim(),
           is_billable: billable,
+          jira_issue_key: jiraKeyInput.trim(),
         });
         if (pendingOutlookEvent) {
           try {
@@ -1456,6 +1469,7 @@ export default function DashboardPage() {
     setProjectTaskId(entry.project_task_id);
     setHoursInput(num(entry.hours).toFixed(2));
     setNotesInput(entry.notes);
+    setJiraKeyInput(entry.jira_issue_key ?? '');
     setBillable(entry.is_billable);
     setFormError(null);
     setQuickAddOpen(true);
@@ -1467,6 +1481,7 @@ export default function DashboardPage() {
     setProjectTaskId('');
     setHoursInput('');
     setNotesInput('');
+    setJiraKeyInput('');
     setBillable(true);
     setFormError(null);
     setPendingOutlookEvent(null);
@@ -1508,6 +1523,7 @@ export default function DashboardPage() {
     const m = Math.round((event.duration_hours - h) * 60);
     setHoursInput(`${h}:${m.toString().padStart(2, '0')}`);
     setNotesInput(event.subject);
+    setJiraKeyInput('');
     setBillable(true);
     setFormError(null);
     setPendingOutlookEvent(event);
@@ -1539,6 +1555,7 @@ export default function DashboardPage() {
         date: activeDateStr,
         notes: notesInput.trim(),
         is_billable: billable,
+        jira_issue_key: jiraKeyInput.trim(),
       });
       setRunningEntry(entry);
       setTickNow(Date.now());
@@ -1558,18 +1575,14 @@ export default function DashboardPage() {
   const handleStartFromRow = async (entry: TimeEntry) => {
     setTimerBusy(true);
     try {
-      if (runningEntry) {
+      if (runningEntry && runningEntry.id !== entry.id) {
         await stopTimer(runningEntry.id);
         setRunningEntry(null);
       }
-      const started = await startTimer({
-        project_id: entry.project_id,
-        project_task_id: entry.project_task_id,
-        date: activeDateStr,
-        notes: entry.notes,
-        is_billable: entry.is_billable,
-      });
-      setRunningEntry(started);
+      // Harvest behavior: resume the SAME entry as a running timer so its hours
+      // accumulate on this row instead of creating a duplicate entry.
+      const resumed = await resumeTimer(entry.id);
+      setRunningEntry(resumed);
       setTickNow(Date.now());
       refetchEntries();
     } catch (err) {
@@ -2677,6 +2690,21 @@ export default function DashboardPage() {
                         />
                       </label>
                     </div>
+
+                    {/* Jira issue — optional. Tags this entry to a Jira ticket so the
+                        Forge App panel can show it inside Jira (Epic 7). */}
+                    <label className="block">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+                        Jira issue <span className="font-normal normal-case text-muted/70">(optional)</span>
+                      </span>
+                      <input
+                        type="text"
+                        value={jiraKeyInput}
+                        onChange={(e) => setJiraKeyInput(e.target.value.toUpperCase())}
+                        placeholder="e.g. PROJ-123"
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-mono uppercase text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      />
+                    </label>
 
                     {formError ? (
                       <div className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">

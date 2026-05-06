@@ -6,6 +6,7 @@ import {
   FolderKanban,
   LogOut,
   Settings as SettingsIcon,
+  SlidersHorizontal,
   UserPlus,
   Users,
   X,
@@ -64,6 +65,13 @@ const navItems: NavItem[] = [
     to: '/manage',
     icon: SettingsIcon,
     roles: ['owner'],
+  },
+  {
+    label: 'Settings',
+    description: 'Billing, preferences, integrations, and security.',
+    to: '/settings',
+    icon: SlidersHorizontal,
+    roles: ['owner', 'admin'],
   },
 ];
 

@@ -263,6 +263,12 @@ class InviteUpdateView(APIView):
         if 'weekly_capacity_hours' in data:
             target.weekly_capacity_hours = data['weekly_capacity_hours']
             update_fields.append('weekly_capacity_hours')
+        if 'hourly_rate' in data:
+            target.hourly_rate = data['hourly_rate']
+            update_fields.append('hourly_rate')
+        if 'cost_rate' in data:
+            target.cost_rate = data['cost_rate']
+            update_fields.append('cost_rate')
         if 'is_active' in data:
             target.is_active = data['is_active']
             update_fields.append('is_active')

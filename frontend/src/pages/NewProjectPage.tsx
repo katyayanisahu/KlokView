@@ -1,8 +1,10 @@
 import {
   ArrowLeft,
+  Briefcase,
   CheckCircle2,
   Circle,
   Clock,
+  DollarSign,
   FileText,
   ListChecks,
   Plus,
@@ -15,13 +17,57 @@ import { listClients } from '@/api/clients';
 import { createProject, listTasks } from '@/api/projects';
 import { extractApiError } from '@/utils/errors';
 import type {
+  BillableRateStrategy,
   BudgetType,
   Client,
+  ProjectType,
   ProjectVisibility,
   Task,
 } from '@/types';
 
-const DEFAULT_PROJECT_TYPE = 'time_materials' as const;
+const PROJECT_TYPE_OPTIONS: Array<{
+  value: ProjectType;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'time_materials',
+    label: 'Time & Materials',
+    description: 'Bill by the hour, with billable rates.',
+  },
+  {
+    value: 'fixed_fee',
+    label: 'Fixed Fee',
+    description: 'Bill a set price, regardless of time tracked.',
+  },
+  {
+    value: 'non_billable',
+    label: 'Non-Billable',
+    description: 'Not billed to a client.',
+  },
+];
+
+const BILLABLE_STRATEGY_OPTIONS: Array<{
+  value: BillableRateStrategy;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'person',
+    label: 'Person billable rate',
+    description: 'Each member uses their own default billable rate.',
+  },
+  {
+    value: 'task',
+    label: 'Task billable rate',
+    description: 'Each task has its own billable rate.',
+  },
+  {
+    value: 'project',
+    label: 'Project billable rate',
+    description: 'A single rate applied to all hours on this project.',
+  },
+];
 
 const BUDGET_OPTIONS: Array<{ value: BudgetType; label: string }> = [
   { value: 'none', label: 'No budget' },
@@ -31,6 +77,7 @@ const BUDGET_OPTIONS: Array<{ value: BudgetType; label: string }> = [
 
 const STEPS = [
   { id: 'basics', label: 'Basics', icon: FileText },
+  { id: 'rates', label: 'Type & Rates', icon: Briefcase },
   { id: 'budget', label: 'Budget', icon: Clock },
   { id: 'tasks', label: 'Tasks', icon: ListChecks },
 ] as const;
@@ -54,6 +101,11 @@ export default function NewProjectPage() {
   const [budgetResetsMonthly, setBudgetResetsMonthly] = useState(false);
   const [budgetIncludesNonBillable, setBudgetIncludesNonBillable] = useState(false);
   const [budgetAlertPercent, setBudgetAlertPercent] = useState<string>('');
+
+  const [projectType, setProjectType] = useState<ProjectType>('time_materials');
+  const [billableRateStrategy, setBillableRateStrategy] =
+    useState<BillableRateStrategy>('person');
+  const [flatBillableRate, setFlatBillableRate] = useState('');
 
   const [clients, setClients] = useState<Client[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -114,6 +166,8 @@ export default function NewProjectPage() {
     setServerError(null);
     setSubmitting(true);
     try {
+      const effectiveStrategy: BillableRateStrategy =
+        projectType === 'non_billable' ? 'none' : billableRateStrategy;
       const project = await createProject({
         client_id: clientId,
         name: name.trim(),
@@ -122,12 +176,17 @@ export default function NewProjectPage() {
         end_date: endDate || null,
         notes: notes.trim() || undefined,
         visibility,
-        project_type: DEFAULT_PROJECT_TYPE,
+        project_type: projectType,
         budget_type: budgetType,
         budget_amount: budgetType === 'none' ? null : budgetAmount || null,
         budget_resets_monthly: budgetResetsMonthly,
         budget_includes_non_billable: budgetIncludesNonBillable,
         budget_alert_percent: budgetAlertPercent ? Number.parseInt(budgetAlertPercent, 10) : null,
+        billable_rate_strategy: effectiveStrategy,
+        flat_billable_rate:
+          effectiveStrategy === 'project' && flatBillableRate.trim() !== ''
+            ? flatBillableRate
+            : null,
         task_ids: Array.from(selectedTaskIds),
       });
       navigate(`/projects/${project.id}`);
@@ -143,6 +202,11 @@ export default function NewProjectPage() {
   // Step completion tracking — drives the left-rail checkmarks and progress bar
   const stepDone = {
     basics: Boolean(clientId) && name.trim().length > 0,
+    rates:
+      projectType === 'non_billable' ||
+      billableRateStrategy === 'person' ||
+      billableRateStrategy === 'task' ||
+      (billableRateStrategy === 'project' && flatBillableRate.trim().length > 0),
     budget: budgetType === 'none' || (budgetNeedsAmount && budgetAmount.trim().length > 0),
     tasks: selectedTaskIds.size > 0,
   };
@@ -417,6 +481,107 @@ export default function NewProjectPage() {
                     </label>
                   </div>
                 </div>
+              </div>
+            </section>
+
+            {/* Project type & Billable rates */}
+            <section
+              id="rates"
+              className="scroll-mt-20 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+            >
+              <header className="flex items-center gap-3 border-b border-slate-200 bg-slate-50/50 px-6 py-4">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary">
+                  <Briefcase className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 className="font-heading text-lg font-bold text-text">Type &amp; Rates</h2>
+                  <p className="text-xs text-muted">
+                    How this project is billed. Drives the Profitability report.
+                  </p>
+                </div>
+              </header>
+              <div className="space-y-5 px-6 py-5">
+                <div>
+                  <label className="label">Project type</label>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {PROJECT_TYPE_OPTIONS.map((opt) => {
+                      const selected = projectType === opt.value;
+                      return (
+                        <label
+                          key={opt.value}
+                          className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm transition ${
+                            selected
+                              ? 'border-primary bg-primary-soft/40'
+                              : 'border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="project_type"
+                            checked={selected}
+                            onChange={() => setProjectType(opt.value)}
+                            className="mt-0.5 h-4 w-4 accent-primary"
+                          />
+                          <span>
+                            <span className="block font-medium text-text">{opt.label}</span>
+                            <span className="block text-xs leading-relaxed text-muted">
+                              {opt.description}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {projectType !== 'non_billable' ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+                    <h3 className="font-semibold text-text">Billable rates</h3>
+                    <p className="mt-1 text-xs text-muted">
+                      We need billable rates to track this project&apos;s billable amount.
+                    </p>
+                    <div className="mt-3">
+                      <select
+                        value={billableRateStrategy}
+                        onChange={(e) =>
+                          setBillableRateStrategy(e.target.value as BillableRateStrategy)
+                        }
+                        className="input w-full sm:w-72"
+                      >
+                        {BILLABLE_STRATEGY_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1.5 text-xs text-muted">
+                        {BILLABLE_STRATEGY_OPTIONS.find((o) => o.value === billableRateStrategy)
+                          ?.description}
+                      </p>
+                    </div>
+                    {billableRateStrategy === 'project' ? (
+                      <div className="mt-4">
+                        <label htmlFor="flat_billable_rate" className="label">
+                          Project rate
+                        </label>
+                        <div className="relative w-full max-w-[220px]">
+                          <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                          <input
+                            id="flat_billable_rate"
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={flatBillableRate}
+                            onChange={(e) => setFlatBillableRate(e.target.value)}
+                            className="input pl-9"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-muted">Charged per hour, regardless of who tracked it.</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </section>
 

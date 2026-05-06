@@ -43,7 +43,7 @@ class ProjectTaskSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProjectTask
-        fields = ('id', 'task_id', 'task_name', 'is_billable', 'hours_logged')
+        fields = ('id', 'task_id', 'task_name', 'is_billable', 'billable_rate', 'hours_logged')
         read_only_fields = ('id', 'task_name', 'hours_logged')
 
     def get_hours_logged(self, obj) -> str:
@@ -85,13 +85,16 @@ class ProjectListSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source='client.name', read_only=True)
     manager_ids = serializers.SerializerMethodField()
     spent_amount = serializers.SerializerMethodField()
+    cost_amount = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
         fields = (
             'id', 'name', 'code', 'client_id', 'client_name',
             'project_type', 'budget_type', 'budget_amount',
-            'manager_ids', 'spent_amount', 'is_active', 'created_at',
+            'billable_rate_strategy', 'flat_billable_rate',
+            'manager_ids', 'spent_amount', 'cost_amount',
+            'is_active', 'created_at',
         )
         read_only_fields = fields
 
@@ -107,6 +110,17 @@ class ProjectListSerializer(serializers.ModelSerializer):
         if annotated is not None:
             return f'{annotated:.2f}'
         return f'{_sum_hours(obj.time_entries.all()):.2f}'
+
+    def get_cost_amount(self, obj) -> str:
+        # Sum of (hours × user.cost_rate) across all time entries on this project.
+        # Cost rate lives on the user — Profitability report depends on this.
+        annotated = getattr(obj, 'cost_amount_db', None)
+        if annotated is not None:
+            return f'{annotated:.2f}'
+        total = Decimal('0')
+        for entry in obj.time_entries.select_related('user').all():
+            total += (entry.hours or Decimal('0')) * (entry.user.cost_rate or Decimal('0'))
+        return f'{total:.2f}'
 
 
 class ProjectDetailSerializer(serializers.ModelSerializer):
@@ -130,6 +144,7 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
             'visibility', 'project_type',
             'budget_type', 'budget_amount', 'budget_resets_monthly',
             'budget_includes_non_billable', 'budget_alert_percent',
+            'billable_rate_strategy', 'flat_billable_rate',
             'is_active', 'project_tasks', 'memberships',
             'total_hours_logged', 'billable_hours_logged', 'non_billable_hours_logged',
             'hours_this_week', 'avg_hours_per_week',
@@ -192,6 +207,7 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             'visibility', 'project_type',
             'budget_type', 'budget_amount', 'budget_resets_monthly',
             'budget_includes_non_billable', 'budget_alert_percent',
+            'billable_rate_strategy', 'flat_billable_rate',
             'is_active',
             'task_ids', 'members',
         )

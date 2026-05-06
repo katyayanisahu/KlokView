@@ -148,6 +148,12 @@ class InviteUpdateSerializer(serializers.Serializer):
     weekly_capacity_hours = serializers.DecimalField(
         max_digits=5, decimal_places=2, required=False,
     )
+    hourly_rate = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, min_value=Decimal('0'),
+    )
+    cost_rate = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, min_value=Decimal('0'),
+    )
     job_role_ids = serializers.PrimaryKeyRelatedField(
         many=True, queryset=JobRole.objects.all(), required=False,
     )
@@ -247,7 +253,9 @@ class TeamMemberDetailSerializer(TeamMemberSerializer):
     project_memberships = serializers.SerializerMethodField()
 
     class Meta(TeamMemberSerializer.Meta):
-        fields = TeamMemberSerializer.Meta.fields + ('project_memberships',)
+        fields = TeamMemberSerializer.Meta.fields + (
+            'project_memberships', 'hourly_rate', 'cost_rate',
+        )
         read_only_fields = fields
 
     def get_project_memberships(self, obj):

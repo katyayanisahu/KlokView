@@ -11,15 +11,22 @@ import EditClientPage from '@/pages/EditClientPage';
 import EditTeamMemberPage from '@/pages/EditTeamMemberPage';
 import ForgotPasswordPage from '@/pages/ForgotPasswordPage';
 import InvitePage from '@/pages/InvitePage';
+import LandingPage from '@/pages/LandingPage';
 import LoginPage from '@/pages/LoginPage';
 import ManageClientsPage from '@/pages/ManageClientsPage';
 import ManageRolesPage from '@/pages/ManageRolesPage';
 import ManageTasksPage from '@/pages/ManageTasksPage';
+import SettingsIntegrationsPage from '@/pages/SettingsIntegrationsPage';
 import NewProjectPage from '@/pages/NewProjectPage';
 import ProjectDetailPage from '@/pages/ProjectDetailPage';
 import ProjectsListPage from '@/pages/ProjectsListPage';
 import RegisterPage from '@/pages/RegisterPage';
-import ReportsPage from '@/pages/ReportsPage';
+import ReportsLayout from '@/pages/reports/ReportsLayout';
+import TimeReportPage from '@/pages/reports/TimeReportPage';
+import ProfitabilityReportPage from '@/pages/reports/ProfitabilityReportPage';
+import DetailedTimeReportPage from '@/pages/reports/DetailedTimeReportPage';
+import ActivityLogReportPage from '@/pages/reports/ActivityLogReportPage';
+import SavedReportsPage from '@/pages/reports/SavedReportsPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import TeamPage from '@/pages/TeamPage';
 import { useAuthStore } from '@/store/authStore';
@@ -146,10 +153,26 @@ export default function App() {
         path="/reports"
         element={
           <ProtectedRoute>
-            <ReportsPage />
+            <RequireRole allow={['owner', 'admin', 'manager', 'member']}>
+              <ReportsLayout />
+            </RequireRole>
           </ProtectedRoute>
         }
-      />
+      >
+        <Route index element={<Navigate to="/reports/time" replace />} />
+        <Route path="time" element={<TimeReportPage />} />
+        <Route
+          path="profitability"
+          element={
+            <RequireRole allow={['owner', 'admin']}>
+              <ProfitabilityReportPage />
+            </RequireRole>
+          }
+        />
+        <Route path="detailed-time" element={<DetailedTimeReportPage />} />
+        <Route path="activity-log" element={<ActivityLogReportPage />} />
+        <Route path="saved" element={<SavedReportsPage />} />
+      </Route>
       <Route path="/manage" element={<Navigate to="/manage/clients" replace />} />
       <Route
         path="/manage/clients"
@@ -191,8 +214,19 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      <Route path="/" element={<Navigate to="/time" replace />} />
-      <Route path="*" element={<Navigate to="/time" replace />} />
+      <Route path="/settings" element={<Navigate to="/settings/integrations" replace />} />
+      <Route
+        path="/settings/integrations"
+        element={
+          <ProtectedRoute>
+            <RequireRole allow={['owner', 'admin']}>
+              <SettingsIntegrationsPage />
+            </RequireRole>
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/" element={<LandingPage />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

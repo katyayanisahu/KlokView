@@ -47,6 +47,7 @@ export interface StartTimerPayload {
   date: string;
   notes?: string;
   is_billable?: boolean;
+  jira_issue_key?: string;
 }
 
 export async function startTimer(payload: StartTimerPayload): Promise<TimeEntry> {
@@ -56,5 +57,10 @@ export async function startTimer(payload: StartTimerPayload): Promise<TimeEntry>
 
 export async function stopTimer(id: number): Promise<TimeEntry> {
   const { data } = await api.post<TimeEntry>(`/time-entries/${id}/stop/`);
+  return data;
+}
+
+export async function resumeTimer(id: number): Promise<TimeEntry> {
+  const { data } = await api.post<TimeEntry>(`/time-entries/${id}/resume/`);
   return data;
 }

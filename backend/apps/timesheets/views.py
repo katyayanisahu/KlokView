@@ -202,6 +202,38 @@ class TimeEntryViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         if user_id and user.role in ('owner', 'admin', 'manager'):
             qs = qs.filter(user_id=user_id)
 
+        # ---- Detailed Time report filters ----
+        client_id = params.get('client_id')
+        if client_id:
+            qs = qs.filter(project__client_id=client_id)
+
+        task_id = params.get('task_id')
+        if task_id:
+            qs = qs.filter(project_task__task_id=task_id)
+
+        is_billable = params.get('is_billable')
+        if is_billable is not None:
+            normalized = str(is_billable).lower()
+            if normalized in ('true', '1', 'yes'):
+                qs = qs.filter(is_billable=True)
+            elif normalized in ('false', '0', 'no'):
+                qs = qs.filter(is_billable=False)
+
+        active_only = params.get('active_only')
+        if active_only is not None and str(active_only).lower() in ('true', '1', 'yes'):
+            qs = qs.filter(project__is_active=True)
+
+        search = params.get('search')
+        if search:
+            qs = qs.filter(
+                Q(notes__icontains=search)
+                | Q(project__name__icontains=search)
+                | Q(project__client__name__icontains=search)
+                | Q(project_task__task__name__icontains=search)
+                | Q(user__full_name__icontains=search)
+                | Q(jira_issue_key__icontains=search)
+            )
+
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -292,6 +324,42 @@ class TimeEntryViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         return Response(
             TimeEntrySerializer(entry, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='resume')
+    def resume(self, request, pk=None):
+        """Resume an existing entry as a running timer (Harvest behavior).
+
+        Unlike `start`, this does NOT create a new TimeEntry — it flips the
+        existing one to is_running=True so subsequent stop adds elapsed time
+        to the same row's hours. Any other running timer is stopped first.
+        """
+        entry = self.get_object()
+        if entry.user_id != request.user.id and request.user.role not in ('owner', 'admin'):
+            return Response(
+                {'detail': 'You can only resume your own entries.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if _is_locked_for(request.user, entry.user_id, entry.date):
+            return Response(
+                {'detail': 'This week is submitted for approval and locked.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if entry.is_running:
+            return Response(
+                TimeEntrySerializer(entry, context={'request': request}).data,
+            )
+        # Stop any other in-flight timer for this user first.
+        for existing in TimeEntry.objects.filter(
+            user_id=request.user.id, is_running=True,
+        ).exclude(pk=entry.pk):
+            _stop_running_entry(existing)
+
+        entry.is_running = True
+        entry.started_at = djtz.now()
+        entry.save(update_fields=['is_running', 'started_at', 'updated_at'])
+        return Response(
+            TimeEntrySerializer(entry, context={'request': request}).data,
         )
 
     @action(detail=True, methods=['post'], url_path='stop')

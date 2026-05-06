@@ -144,10 +144,15 @@ class ProjectViewSet(TenantScopedMixin, viewsets.ModelViewSet):
             budget_resets_monthly=original.budget_resets_monthly,
             budget_includes_non_billable=original.budget_includes_non_billable,
             budget_alert_percent=original.budget_alert_percent,
+            billable_rate_strategy=original.billable_rate_strategy,
+            flat_billable_rate=original.flat_billable_rate,
             is_active=True,
         )
         for pt in original.project_tasks.all():
-            ProjectTask.objects.create(project=copy, task=pt.task, is_billable=pt.is_billable)
+            ProjectTask.objects.create(
+                project=copy, task=pt.task,
+                is_billable=pt.is_billable, billable_rate=pt.billable_rate,
+            )
         for pm in original.memberships.all():
             ProjectMembership.objects.create(
                 project=copy,
@@ -168,9 +173,12 @@ class ProjectViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         serializer = ProjectTaskSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         task = serializer.validated_data['task']
+        defaults = {'is_billable': serializer.validated_data.get('is_billable', True)}
+        if 'billable_rate' in serializer.validated_data:
+            defaults['billable_rate'] = serializer.validated_data['billable_rate']
         pt, created = ProjectTask.objects.update_or_create(
             project=project, task=task,
-            defaults={'is_billable': serializer.validated_data.get('is_billable', True)},
+            defaults=defaults,
         )
         return Response(
             ProjectTaskSerializer(pt).data,

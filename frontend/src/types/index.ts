@@ -47,6 +47,8 @@ export interface InviteUpdatePayload {
   role?: InviteRole;
   employee_id?: string;
   weekly_capacity_hours?: number | string;
+  hourly_rate?: number | string;
+  cost_rate?: number | string;
   job_role_ids?: number[];
   is_active?: boolean;
 }
@@ -103,6 +105,8 @@ export interface TeamMemberProjectMembership {
 
 export interface TeamMemberDetail extends TeamMember {
   project_memberships: TeamMemberProjectMembership[];
+  hourly_rate?: string;
+  cost_rate?: string;
 }
 
 export type InviteInvalidReason = 'expired' | 'not_found' | 'already_used';
@@ -193,6 +197,7 @@ export interface ClientCreatePayload {
 export type ProjectType = 'time_materials' | 'fixed_fee' | 'non_billable';
 export type BudgetType = 'none' | 'total_fees' | 'total_hours' | 'hours_per_task' | 'fees_per_task';
 export type ProjectVisibility = 'admins_and_managers' | 'everyone';
+export type BillableRateStrategy = 'person' | 'task' | 'project' | 'none';
 
 export interface ProjectListItem {
   id: number;
@@ -203,9 +208,12 @@ export interface ProjectListItem {
   project_type: ProjectType;
   budget_type: BudgetType;
   budget_amount: string | null;
+  billable_rate_strategy?: BillableRateStrategy;
+  flat_billable_rate?: string | null;
   manager_ids: number[];
   spent_amount?: string | null;
   costs_amount?: string | null;
+  cost_amount?: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -278,6 +286,8 @@ export interface ProjectDetail {
   budget_resets_monthly: boolean;
   budget_includes_non_billable: boolean;
   budget_alert_percent: number | null;
+  billable_rate_strategy?: BillableRateStrategy;
+  flat_billable_rate?: string | null;
   is_active: boolean;
   project_tasks: ProjectTaskEntry[];
   memberships: ProjectMemberEntry[];
@@ -305,6 +315,7 @@ export interface TimeEntry {
   hours: string; // decimal string, e.g. "1.50"
   notes: string;
   is_billable: boolean;
+  jira_issue_key: string;
   is_running: boolean;
   started_at: string | null;
   created_at: string;
@@ -318,6 +329,7 @@ export interface TimeEntryCreatePayload {
   hours: string | number;
   notes?: string;
   is_billable?: boolean;
+  jira_issue_key?: string;
 }
 
 export interface TimeEntryUpdatePayload {
@@ -327,6 +339,7 @@ export interface TimeEntryUpdatePayload {
   hours?: string | number;
   notes?: string;
   is_billable?: boolean;
+  jira_issue_key?: string;
 }
 
 export interface TimeEntryListParams {
@@ -335,6 +348,11 @@ export interface TimeEntryListParams {
   end_date?: string;
   project_id?: number;
   user_id?: number;
+  client_id?: number;
+  task_id?: number;
+  is_billable?: boolean;
+  active_only?: boolean;
+  search?: string;
 }
 
 // ---- Submissions (Epic 6) ----
@@ -391,6 +409,16 @@ export interface ProjectCreatePayload {
   budget_resets_monthly?: boolean;
   budget_includes_non_billable?: boolean;
   budget_alert_percent?: number | null;
+  billable_rate_strategy?: BillableRateStrategy;
+  flat_billable_rate?: string | null;
   task_ids?: number[];
   members?: Array<{ user_id: number; hourly_rate?: string | null; is_project_manager?: boolean }>;
+}
+
+export interface ProjectTaskEntryFull {
+  id: number;
+  task_name: string;
+  is_billable: boolean;
+  billable_rate: string | null;
+  hours_logged?: string;
 }

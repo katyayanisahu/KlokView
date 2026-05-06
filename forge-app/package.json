@@ -1,0 +1,21 @@
+{
+  "name": "klokview-jira-forge-app",
+  "version": "0.1.0",
+  "description": "Jira Forge App for KlokView time tracking — embeds a panel inside every Jira issue showing KlokView time entries and a deep-link back to the KlokView web app.",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "lint": "forge lint",
+    "deploy": "forge deploy",
+    "install-app": "forge install",
+    "tunnel": "forge tunnel"
+  },
+  "dependencies": {
+    "@forge/api": "^7.1.4",
+    "@forge/bridge": "^4.5.0",
+    "@forge/react": "^11.5.0",
+    "@forge/resolver": "^1.6.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
