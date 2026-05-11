@@ -439,14 +439,20 @@ export default function DetailedTimeReportPage() {
             }
             onPrev={handlePrev}
             onNext={handleNext}
+            customStart={startDate}
+            customEnd={endDate}
+            onCustomChange={(s, e) => {
+              setStartDate(s);
+              setEndDate(e);
+            }}
           />
         </div>
       </section>
 
       {/* SECTION 2 — Filter panel */}
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-3 sm:px-6">
-          <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+        <div className="flex items-center gap-3 border-b border-primary/15 bg-primary-soft/40 px-4 py-3 sm:px-6">
+          <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-primary ring-1 ring-primary/20">
             <SlidersHorizontal className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">

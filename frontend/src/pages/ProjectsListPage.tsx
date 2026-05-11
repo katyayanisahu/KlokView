@@ -23,11 +23,13 @@ import PageHero from '@/components/PageHero';
 import { useUndoDelete } from '@/hooks/useUndoDelete';
 import {
   archiveProject,
+  createProject,
   deleteProject,
   duplicateProject,
   listProjects,
   restoreProject,
 } from '@/api/projects';
+import { createClient, listClients } from '@/api/clients';
 import { listUsers } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 import { extractApiError } from '@/utils/errors';
@@ -385,7 +387,7 @@ export default function ProjectsListPage() {
                   <FolderKanban className="h-5 w-5" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+                  <p className="text-sm font-semibold uppercase tracking-wider text-muted">
                     Active
                   </p>
                   <p className="font-heading text-2xl font-bold leading-tight text-text">
@@ -398,7 +400,7 @@ export default function ProjectsListPage() {
                   <Target className="h-5 w-5" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+                  <p className="text-sm font-semibold uppercase tracking-wider text-primary">
                     With budget
                   </p>
                   <p className="font-heading text-2xl font-bold leading-tight text-primary">
@@ -411,7 +413,7 @@ export default function ProjectsListPage() {
                   <Pin className="h-5 w-5" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-dark">
+                  <p className="text-sm font-semibold uppercase tracking-wider text-accent-dark">
                     Pinned
                   </p>
                   <p className="font-heading text-2xl font-bold leading-tight text-accent-dark">
@@ -432,7 +434,7 @@ export default function ProjectsListPage() {
                   <Archive className="h-5 w-5" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+                  <p className="text-sm font-semibold uppercase tracking-wider text-muted">
                     Archived
                   </p>
                   <p className="font-heading text-2xl font-bold leading-tight text-muted">
@@ -510,7 +512,7 @@ export default function ProjectsListPage() {
 
         {/* Filter chip bar — pill-style, distinct from Harvest's dropdown row */}
         <div className="mb-6 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted">Filter</span>
+          <span className="text-sm font-semibold uppercase tracking-wider text-muted">Filter</span>
           <ChipSelect
             label="Client"
             value={clientFilter}
@@ -815,7 +817,7 @@ function ClientGroupCard({
             <span className="font-heading text-base font-bold">{title}</span>
           )}
         </div>
-        <span className="rounded-full bg-white/70 px-2.5 py-0.5 text-xs font-semibold">
+        <span className="rounded-full bg-white/70 px-3 py-1 text-sm font-semibold">
           {projectCount} {projectCount === 1 ? 'project' : 'projects'}
         </span>
       </header>
@@ -857,14 +859,14 @@ function Metric({
 }) {
   return (
     <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">{label}</p>
+      <p className="text-sm font-semibold uppercase tracking-wider text-muted">{label}</p>
       <p
         className={`mt-0.5 tabular-nums font-medium ${
           tone === 'danger' ? 'text-danger' : 'text-text'
         }`}
       >
         {value}
-        {sub ? <span className="ml-1 text-[11px] font-normal text-muted">{sub}</span> : null}
+        {sub ? <span className="ml-1 text-sm font-normal text-muted">{sub}</span> : null}
       </p>
     </div>
   );
@@ -980,7 +982,7 @@ function ProjectRow({
 
           {/* Metrics grid */}
           <div
-            className={`mt-2.5 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:gap-x-6 ${
+            className={`mt-2.5 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:gap-x-6 ${
               canEdit ? 'sm:grid-cols-2 lg:grid-cols-4 lg:gap-y-1' : 'sm:grid-cols-3 sm:gap-y-1'
             }`}
           >
@@ -1034,13 +1036,13 @@ function ProjectRow({
                 ) : null}
               </div>
               {spentNum === 0 ? (
-                <p className="mt-1 text-[10px] text-muted">
+                <p className="mt-1 text-sm text-muted">
                   No time logged yet — bar will fill as your team tracks hours.
                 </p>
               ) : null}
             </div>
           ) : project.budget_type === 'none' ? (
-            <p className="mt-3 text-[10px] italic text-muted">No budget set</p>
+            <p className="mt-3 text-sm text-muted">No budget set</p>
           ) : null}
         </div>
 
@@ -1141,20 +1143,62 @@ function ImportProjectsModal({
   const [parsing, setParsing] = useState(false);
   const [preview, setPreview] = useState<string[][] | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+
+  // Proper CSV line parser (handles quoted fields with embedded commas).
+  const parseCsvLine = (line: string): string[] => {
+    const out: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"' && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else if (ch === '"') {
+          inQuotes = false;
+        } else {
+          cur += ch;
+        }
+      } else if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        out.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur);
+    return out.map((c) => c.trim());
+  };
+
+  // Accepts DD-MM-YYYY, DD/MM/YYYY, or ISO YYYY-MM-DD. Returns ISO or null.
+  const toIsoDate = (raw: string): string | null => {
+    const v = raw.trim();
+    if (!v) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    const m = v.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (m) {
+      const [, d, mo, y] = m;
+      return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    return null;
+  };
 
   const handleFile = async (f: File) => {
     setFile(f);
     setErrorMsg(null);
+    setProgress(null);
     setParsing(true);
     try {
       const text = await f.text();
       const rows = text
         .split(/\r?\n/)
         .filter((line) => line.trim().length > 0)
-        .map((line) =>
-          // simple split — full CSV quoting parser is overkill for preview
-          line.split(',').map((c) => c.trim().replace(/^"|"$/g, '')),
-        );
+        .map(parseCsvLine);
       setPreview(rows.slice(0, 6));
     } catch (err) {
       setErrorMsg('Could not read this file.');
@@ -1180,15 +1224,188 @@ function ImportProjectsModal({
   };
 
   const handleConfirm = async () => {
-    if (!preview || preview.length < 2) {
+    if (!preview || preview.length < 2 || !file) {
       setErrorMsg('No project rows found. Please pick a CSV with at least one project.');
       return;
     }
-    // Note: bulk import endpoint isn't wired backend-side yet — we surface a friendly notice.
-    setErrorMsg(
-      'Preview only — bulk-create is not yet wired to the API. Use “New project” to add one at a time.',
-    );
-    onImported();
+
+    setSubmitting(true);
+    setErrorMsg(null);
+    setProgress('Reading file…');
+
+    try {
+      const text = await file.text();
+      const allRows = text
+        .split(/\r?\n/)
+        .filter((line) => line.trim().length > 0)
+        .map(parseCsvLine);
+
+      // Skip header row when first cell looks like a header.
+      const first = allRows[0]?.[0]?.toLowerCase() ?? '';
+      const dataRows =
+        first.includes('client') || first === 'name' ? allRows.slice(1) : allRows;
+
+      if (dataRows.length === 0) {
+        setErrorMsg('No project rows found below the header.');
+        setSubmitting(false);
+        setProgress(null);
+        return;
+      }
+
+      // Validate that the file looks like a projects CSV (not, e.g., time entries).
+      // Required: at least 2 columns and the first row must have a client + project name.
+      const sampleRow = dataRows[0];
+      if (!sampleRow || sampleRow.length < 2 || !sampleRow[0] || !sampleRow[1]) {
+        setErrorMsg(
+          'CSV format not recognised. Expected columns: Client, Project, Project Code, Start Date, End Date, Project Notes.',
+        );
+        setSubmitting(false);
+        setProgress(null);
+        return;
+      }
+
+      // Validate + parse all rows up front. Build the set of unique client names
+      // we need so we can resolve / create them once instead of per row.
+      interface ParsedRow {
+        idx: number;
+        clientName: string;
+        projectName: string;
+        projectCode: string;
+        startDate: string | null;
+        endDate: string | null;
+        notes: string;
+      }
+      const parsed: ParsedRow[] = [];
+      const failures: string[] = [];
+      let idx = 0;
+      for (const row of dataRows) {
+        idx++;
+        const clientName = row[0]?.trim();
+        const projectName = row[1]?.trim();
+        const projectCode = row[2]?.trim() ?? '';
+        const startDateRaw = row[3]?.trim() ?? '';
+        const endDateRaw = row[4]?.trim() ?? '';
+        const notes = row[5]?.trim() ?? '';
+
+        if (!clientName || !projectName) {
+          failures.push(`Row ${idx}: missing client or project name`);
+          continue;
+        }
+        const startDate = startDateRaw ? toIsoDate(startDateRaw) : null;
+        if (startDateRaw && !startDate) {
+          failures.push(`Row ${idx} (${projectName}): bad start date "${startDateRaw}"`);
+          continue;
+        }
+        const endDate = endDateRaw ? toIsoDate(endDateRaw) : null;
+        if (endDateRaw && !endDate) {
+          failures.push(`Row ${idx} (${projectName}): bad end date "${endDateRaw}"`);
+          continue;
+        }
+        parsed.push({
+          idx, clientName, projectName, projectCode, startDate, endDate, notes,
+        });
+      }
+
+      if (parsed.length === 0) {
+        setErrorMsg(
+          failures.length
+            ? `No valid rows.\n${failures.join('\n')}`
+            : 'No valid project rows found.',
+        );
+        setSubmitting(false);
+        setProgress(null);
+        return;
+      }
+
+      // Resolve every unique client up front so we don't create duplicates.
+      setProgress('Loading clients…');
+      const clientByName = new Map<string, number>();
+      try {
+        const existing = await listClients();
+        for (const c of existing.results) {
+          clientByName.set(c.name.trim().toLowerCase(), c.id);
+        }
+      } catch {
+        // If we can't load existing clients, fall through — each row will try
+        // to create its client and surface a clear per-row failure if it dupes.
+      }
+
+      const uniqueClientNames = Array.from(
+        new Set(parsed.map((p) => p.clientName.toLowerCase())),
+      );
+      const toCreate = uniqueClientNames.filter((n) => !clientByName.has(n));
+      if (toCreate.length > 0) {
+        setProgress(`Creating ${toCreate.length} new client${toCreate.length === 1 ? '' : 's'}…`);
+        // Run client creates in parallel — different names so no ordering issues.
+        await Promise.all(
+          toCreate.map(async (lowerName) => {
+            // Use the original casing from the first row that mentions this client.
+            const original = parsed.find((p) => p.clientName.toLowerCase() === lowerName);
+            const name = original ? original.clientName : lowerName;
+            try {
+              const c = await createClient({ name });
+              clientByName.set(lowerName, c.id);
+            } catch (err) {
+              failures.push(`Client "${name}": ${extractApiError(err, 'failed to create')}`);
+            }
+          }),
+        );
+      }
+
+      // Create projects. Run in batches of 5 in parallel — fast but bounded so
+      // we don't overwhelm the backend if the file is large.
+      const created: string[] = [];
+      const BATCH = 5;
+      for (let i = 0; i < parsed.length; i += BATCH) {
+        const batch = parsed.slice(i, i + BATCH);
+        setProgress(`Importing ${Math.min(i + BATCH, parsed.length)}/${parsed.length}…`);
+        await Promise.all(
+          batch.map(async (p) => {
+            const clientId = clientByName.get(p.clientName.toLowerCase());
+            if (!clientId) {
+              failures.push(`Row ${p.idx} (${p.projectName}): client "${p.clientName}" unavailable`);
+              return;
+            }
+            try {
+              await createProject({
+                name: p.projectName,
+                client_id: clientId,
+                code: p.projectCode || undefined,
+                start_date: p.startDate ?? null,
+                end_date: p.endDate ?? null,
+                notes: p.notes || undefined,
+              });
+              created.push(p.projectName);
+            } catch (err) {
+              failures.push(`Row ${p.idx} (${p.projectName}): ${extractApiError(err, 'failed')}`);
+            }
+          }),
+        );
+      }
+
+      setProgress(null);
+
+      if (created.length === 0) {
+        setErrorMsg(
+          failures.length
+            ? `No projects imported.\n${failures.join('\n')}`
+            : 'No valid project rows found.',
+        );
+        setSubmitting(false);
+        return;
+      }
+
+      if (failures.length) {
+        alert(
+          `Imported ${created.length} project${created.length === 1 ? '' : 's'}. ${failures.length} failed:\n${failures.join('\n')}`,
+        );
+      }
+      onImported();
+    } catch (err) {
+      setErrorMsg(extractApiError(err, 'Could not import projects.'));
+      setProgress(null);
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -1240,7 +1457,20 @@ function ImportProjectsModal({
             </span>
           </div>
 
-          {parsing ? (
+          {submitting ? (
+            <div className="mt-4 flex flex-col items-center justify-center gap-3 rounded-lg border border-primary/20 bg-primary-soft/40 px-4 py-8 text-center">
+              <div
+                className="h-8 w-8 animate-spin rounded-full border-2 border-primary/30 border-t-primary"
+                aria-hidden="true"
+              />
+              <p className="text-sm font-semibold text-primary">
+                {progress ?? 'Importing…'}
+              </p>
+              <p className="text-xs text-muted">
+                This may take a moment for larger files. Don't close this window.
+              </p>
+            </div>
+          ) : parsing ? (
             <p className="mt-3 text-xs text-muted">Reading file…</p>
           ) : preview ? (
             <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
@@ -1269,22 +1499,27 @@ function ImportProjectsModal({
           ) : null}
 
           {errorMsg ? (
-            <div className="mt-4 rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
+            <div className="mt-4 whitespace-pre-wrap rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
               {errorMsg}
             </div>
           ) : null}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-3">
-          <button type="button" onClick={onClose} className="btn-outline">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="btn-outline disabled:cursor-not-allowed disabled:opacity-60"
+          >
             Cancel
           </button>
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={!preview}
+            disabled={!preview || submitting}
             className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Upload and import projects
+            {submitting ? 'Importing…' : 'Upload and import projects'}
           </button>
         </div>
       </div>

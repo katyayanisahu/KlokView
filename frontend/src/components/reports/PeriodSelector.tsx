@@ -19,6 +19,10 @@ interface PeriodSelectorProps {
   rangeLabel: string;
   onPrev?: () => void;
   onNext?: () => void;
+  // When `period === 'custom'`, two date inputs are rendered inline.
+  customStart?: string;
+  customEnd?: string;
+  onCustomChange?: (start: string, end: string) => void;
 }
 
 export default function PeriodSelector({
@@ -27,6 +31,9 @@ export default function PeriodSelector({
   rangeLabel,
   onPrev,
   onNext,
+  customStart,
+  customEnd,
+  onCustomChange,
 }: PeriodSelectorProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -62,7 +69,29 @@ export default function PeriodSelector({
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
-      <h3 className="px-2 font-heading text-base font-bold text-text sm:px-4 sm:text-lg">{rangeLabel}</h3>
+      {period === 'custom' && onCustomChange ? (
+        <div className="flex flex-wrap items-center gap-2 px-2 sm:px-4">
+          <input
+            type="date"
+            value={customStart ?? ''}
+            max={customEnd || undefined}
+            onChange={(e) => onCustomChange(e.target.value, customEnd ?? '')}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-text"
+            aria-label="Custom start date"
+          />
+          <span className="text-sm font-medium text-muted">to</span>
+          <input
+            type="date"
+            value={customEnd ?? ''}
+            min={customStart || undefined}
+            onChange={(e) => onCustomChange(customStart ?? '', e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-text"
+            aria-label="Custom end date"
+          />
+        </div>
+      ) : (
+        <h3 className="px-2 font-heading text-base font-bold text-text sm:px-4 sm:text-lg">{rangeLabel}</h3>
+      )}
       <div className="relative" ref={ref}>
         <button
           type="button"

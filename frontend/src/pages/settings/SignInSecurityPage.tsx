@@ -20,6 +20,7 @@ import {
 } from '@/api/accountSettings';
 
 const SESSION_TIMEOUTS = [
+  { v: 2, l: '2 minutes (test)' },
   { v: 30, l: '30 minutes' },
   { v: 60, l: '1 hour' },
   { v: 240, l: '4 hours' },
@@ -162,33 +163,33 @@ export default function SignInSecurityPage() {
         <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary-soft/40 px-4 py-3 text-xs text-text/80">
           <Info className="mt-0.5 h-4 w-4 flex-none text-primary" />
           <p>
-            These flags are persisted on the workspace. Full enforcement (2FA challenge, SSO
-            providers, session expiry, login alerts) is wired across multiple releases — toggling a
-            switch marks the policy without forcing it yet.
+            <strong>Session timeout</strong> is live and enforced. Other policies (2FA, Google
+            sign-in, login alerts, active sessions) are visible here as placeholders — they&apos;ll
+            wire up across upcoming releases.
           </p>
         </div>
 
         {/* 2FA */}
-        <Card icon={ShieldCheck} title="Two-factor authentication">
+        <Card icon={ShieldCheck} title="Two-factor authentication" comingSoon>
           <Toggle
             label="Require 2FA for everyone"
             description="All teammates must set up an authenticator app (TOTP) on next sign-in."
             on={settings.require_two_factor}
             saving={saving === 'require_two_factor'}
             onChange={(v) => updateField('require_two_factor', v)}
-            disabled={!canEdit}
+            disabled
           />
         </Card>
 
         {/* Google */}
-        <Card icon={LogIn} title="Sign in with Google">
+        <Card icon={LogIn} title="Sign in with Google" comingSoon>
           <Toggle
             label="Allow Google sign-in"
             description="Members can sign in with their Google account in addition to email/password."
             on={settings.allow_google_sso}
             saving={saving === 'allow_google_sso'}
             onChange={(v) => updateField('allow_google_sso', v)}
-            disabled={!canEdit}
+            disabled
           />
         </Card>
 
@@ -232,19 +233,19 @@ export default function SignInSecurityPage() {
         </Card>
 
         {/* Login alerts */}
-        <Card icon={Bell} title="Login alerts">
+        <Card icon={Bell} title="Login alerts" comingSoon>
           <Toggle
             label="Email each member on new device sign-in"
             description="Sends a notification when an account signs in from a device or location it has not used before."
             on={settings.login_alerts}
             saving={saving === 'login_alerts'}
             onChange={(v) => updateField('login_alerts', v)}
-            disabled={!canEdit}
+            disabled
           />
         </Card>
 
         {/* Active sessions */}
-        <Card icon={Monitor} title="Active sessions">
+        <Card icon={Monitor} title="Active sessions" comingSoon>
           <p className="px-5 py-4 text-xs text-muted">
             Devices currently signed in to your account. Revoke any session you don&apos;t recognize.
           </p>
@@ -289,20 +290,52 @@ function Card({
   icon: Icon,
   title,
   children,
+  comingSoon = false,
+  live = false,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   children: React.ReactNode;
+  comingSoon?: boolean;
+  live?: boolean;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section
+      className={`overflow-hidden rounded-xl border bg-white shadow-sm ${
+        comingSoon ? 'border-slate-200/70' : 'border-slate-200'
+      }`}
+    >
       <header className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
-        <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary-soft text-primary">
+        <span
+          className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${
+            comingSoon ? 'bg-slate-100 text-muted' : 'bg-primary-soft text-primary'
+          }`}
+        >
           <Icon className="h-4 w-4" />
         </span>
-        <h2 className="font-heading text-base font-bold text-text">{title}</h2>
+        <h2
+          className={`font-heading text-base font-bold ${
+            comingSoon ? 'text-muted' : 'text-text'
+          }`}
+        >
+          {title}
+        </h2>
+        {comingSoon ? (
+          <span className="ml-auto inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
+            Coming soon
+          </span>
+        ) : live ? (
+          <span className="ml-auto inline-flex items-center rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-dark">
+            Live
+          </span>
+        ) : null}
       </header>
-      <div>{children}</div>
+      <div
+        className={comingSoon ? 'pointer-events-none select-none opacity-50' : ''}
+        aria-disabled={comingSoon}
+      >
+        {children}
+      </div>
     </section>
   );
 }

@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Mail,
   MoreHorizontal,
   Pencil,
@@ -17,7 +15,10 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import PageHero from '@/components/PageHero';
 import { useConfirm } from '@/components/ConfirmDialog';
+import PeriodSelector, { type Period } from '@/components/reports/PeriodSelector';
+import { computeRange, formatRangeLabel, nudgeAnchor } from '@/components/reports/dateRange';
 import { resendInvite } from '@/api/invites';
+import { getTimeReport } from '@/api/reports';
 import {
   archiveTeamMember,
   deleteUser,
@@ -26,8 +27,7 @@ import {
 } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 import { extractApiError } from '@/utils/errors';
-import { startOfWeek as startOfWeekPref, useWeekStart } from '@/utils/preferences';
-import type { WeekStart } from '@/api/accountSettings';
+import { useFiscalYearStartMonth, useWeekStart } from '@/utils/preferences';
 import type { Role, TeamMember } from '@/types';
 
 type RoleFilter =
@@ -69,25 +69,10 @@ const FILTER_SECTIONS: FilterSection[] = [
   { label: 'Role', options: ['owner', 'admin', 'manager', 'member'] },
 ];
 
-function startOfWeek(d: Date, weekStartsOn: WeekStart = 'monday'): Date {
-  return startOfWeekPref(d, weekStartsOn);
-}
-
-function formatWeekRange(start: Date): string {
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  const sameMonth = start.getMonth() === end.getMonth();
-  const startStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const endStr = sameMonth
-    ? end.toLocaleDateString('en-US', { day: 'numeric' })
-    : end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const year = end.getFullYear();
-  return `${startStr} – ${endStr}, ${year}`;
-}
-
-function isCurrentWeek(start: Date, weekStartsOn: WeekStart): boolean {
-  const today = startOfWeek(new Date(), weekStartsOn);
-  return start.getTime() === today.getTime();
+interface WindowStats {
+  hours: number;
+  billable: number;
+  utilization: number;
 }
 
 export default function TeamPage() {
@@ -106,12 +91,75 @@ export default function TeamPage() {
   const [openActionsId, setOpenActionsId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const weekStartsOn = useWeekStart();
-  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date(), weekStartsOn));
+  const fiscalStartMonth = useFiscalYearStartMonth();
+  const [period, setPeriod] = useState<Period>('week');
+  const [anchor, setAnchor] = useState<Date>(() => new Date());
+  const todayIso = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+  const monthStartIso = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  }, []);
+  const [customStart, setCustomStart] = useState<string>(monthStartIso);
+  const [customEnd, setCustomEnd] = useState<string>(todayIso);
+  const range = useMemo(() => {
+    if (period === 'custom') return { start: customStart, end: customEnd };
+    return computeRange(period, anchor, weekStartsOn, fiscalStartMonth);
+  }, [period, anchor, weekStartsOn, fiscalStartMonth, customStart, customEnd]);
+  const isAllTime = period === 'all_time';
+  const rangeLabel = isAllTime ? 'All time' : formatRangeLabel(range.start, range.end);
 
-  // Re-anchor when the workspace preference changes
+  // How many weeks the active window spans — used to scale weekly capacity into
+  // a window-sized capacity figure for the summary card and per-row capacity.
+  const weeksInWindow = useMemo(() => {
+    if (isAllTime) return 1;
+    const start = new Date(`${range.start}T00:00:00`);
+    const end = new Date(`${range.end}T00:00:00`);
+    const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
+    return days / 7;
+  }, [range.start, range.end, isAllTime]);
+
+  // Per-user hours fetched from the time-report for the active window.
+  // Keyed by user id so the summary + each row can pick out their value.
+  const [windowByUser, setWindowByUser] = useState<Map<number, WindowStats>>(new Map());
+  const [windowLoading, setWindowLoading] = useState(false);
+
   useEffect(() => {
-    setWeekStart(startOfWeek(new Date(), weekStartsOn));
-  }, [weekStartsOn]);
+    let cancelled = false;
+    setWindowLoading(true);
+    getTimeReport({
+      start: isAllTime ? undefined : range.start,
+      end: isAllTime ? undefined : range.end,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        const map = new Map<number, WindowStats>();
+        for (const row of data.team) {
+          if (row.id == null) continue;
+          map.set(row.id, {
+            hours: Number.parseFloat(row.hours) || 0,
+            billable: Number.parseFloat(row.billable_hours) || 0,
+            utilization: row.utilization ?? 0,
+          });
+        }
+        setWindowByUser(map);
+      })
+      .catch(() => {
+        if (!cancelled) setWindowByUser(new Map());
+      })
+      .finally(() => {
+        if (!cancelled) setWindowLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range.start, range.end, isAllTime]);
+
+  const canNudge = !['all_time', 'custom'].includes(period);
+  const handlePrev = canNudge ? () => setAnchor((a) => nudgeAnchor(a, period, -1)) : undefined;
+  const handleNext = canNudge ? () => setAnchor((a) => nudgeAnchor(a, period, 1)) : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -161,25 +209,28 @@ export default function TeamPage() {
 
   const totals = useMemo(() => {
     const active = members.filter((m) => m.is_active);
-    const totalCapacity = active.reduce(
+    const weeklyCapacity = active.reduce(
       (sum, m) => sum + Number.parseFloat(m.weekly_capacity_hours || '0'),
       0,
     );
-    const tracked = active.reduce(
-      (sum, m) => sum + Number.parseFloat(m.tracked_hours_this_week || '0'),
-      0,
-    );
-    const billable = active.reduce(
-      (sum, m) => sum + Number.parseFloat(m.billable_hours_this_week || '0'),
-      0,
-    );
+    // Capacity scales with the window length (e.g., a month = ~4.33 × weekly).
+    // For "All time" we can't scale meaningfully, so we just show weekly.
+    const capacity = isAllTime ? weeklyCapacity : weeklyCapacity * weeksInWindow;
+    let tracked = 0;
+    let billable = 0;
+    for (const m of active) {
+      const w = windowByUser.get(m.id);
+      tracked += w?.hours ?? 0;
+      billable += w?.billable ?? 0;
+    }
     return {
       tracked,
       billable,
       nonBillable: Math.max(tracked - billable, 0),
-      capacity: totalCapacity,
+      capacity,
+      weeklyCapacity,
     };
-  }, [members]);
+  }, [members, windowByUser, weeksInWindow, isAllTime]);
 
   const handleResend = async (member: TeamMember) => {
     setResendingId(member.id);
@@ -262,14 +313,6 @@ export default function TeamPage() {
 
   const canDelete = currentUser?.role === 'owner';
 
-  const shiftWeek = (delta: number) => {
-    const next = new Date(weekStart);
-    next.setDate(weekStart.getDate() + delta * 7);
-    setWeekStart(next);
-  };
-
-  const goCurrentWeek = () => setWeekStart(startOfWeek(new Date(), weekStartsOn));
-
   return (
     <div className="min-h-screen bg-bg">
       {confirmDialog}
@@ -286,41 +329,24 @@ export default function TeamPage() {
       />
 
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-        {/* Date range header */}
+        {/* Period + role filter row */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => shiftWeek(-1)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-muted transition hover:bg-slate-50"
-              aria-label="Previous week"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => shiftWeek(1)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-muted transition hover:bg-slate-50"
-              aria-label="Next week"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-            <div className="ml-2 flex items-baseline gap-2">
-              <h2 className="font-heading text-lg font-bold text-text">
-                {isCurrentWeek(weekStart, weekStartsOn) ? 'This week' : 'Week of'}
-              </h2>
-              <span className="text-sm text-muted">{formatWeekRange(weekStart)}</span>
-            </div>
-            {!isCurrentWeek(weekStart, weekStartsOn) ? (
-              <button
-                type="button"
-                onClick={goCurrentWeek}
-                className="ml-2 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-slate-50 hover:text-text"
-              >
-                Current week
-              </button>
-            ) : null}
-          </div>
+          <PeriodSelector
+            period={period}
+            onPeriodChange={(next) => {
+              setPeriod(next);
+              setAnchor(new Date());
+            }}
+            rangeLabel={rangeLabel}
+            onPrev={handlePrev}
+            onNext={handleNext}
+            customStart={customStart}
+            customEnd={customEnd}
+            onCustomChange={(s, e) => {
+              setCustomStart(s);
+              setCustomEnd(e);
+            }}
+          />
 
           <RoleFilterDropdown
             value={roleFilter}
@@ -332,12 +358,22 @@ export default function TeamPage() {
 
         {/* Summary strip */}
         <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <SummaryCard label="Total hours" value={totals.tracked.toFixed(2)} accent="primary" />
+          <SummaryCard
+            label="Total hours"
+            value={windowLoading ? '…' : totals.tracked.toFixed(2)}
+            accent="primary"
+          />
           <SummaryCard
             label="Team capacity"
             value={totals.capacity.toFixed(2)}
             accent="muted"
-            suffix="hr / week"
+            suffix={
+              isAllTime
+                ? 'hr / week'
+                : period === 'custom'
+                  ? `hr · ${Math.round(weeksInWindow * 7)} days`
+                  : `hr / ${period === 'semimonth' ? 'half-month' : period}`
+            }
           />
           <BillableCard
             billable={totals.billable}
@@ -381,8 +417,8 @@ export default function TeamPage() {
         ) : filtered.length === 0 ? (
           <EmptyState filter={roleFilter} hasSearch={search.length > 0} />
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="hidden grid-cols-[1fr_120px_120px_120px_120px_56px] items-center gap-3 border-b-2 border-slate-200 px-5 py-3 lg:grid">
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="hidden grid-cols-[1fr_120px_120px_120px_120px_56px] items-center gap-3 rounded-t-2xl border-b-2 border-slate-200 px-5 py-3 lg:grid">
               <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                 Employee
               </p>
@@ -406,6 +442,9 @@ export default function TeamPage() {
                 <MemberRow
                   key={m.id}
                   member={m}
+                  window={windowByUser.get(m.id)}
+                  weeksInWindow={weeksInWindow}
+                  isAllTime={isAllTime}
                   resending={resendingId === m.id}
                   busy={busyId === m.id}
                   canDelete={canDelete && m.role !== 'owner' && m.id !== currentUser?.id}
@@ -562,11 +601,15 @@ function BillableCard({
 }
 
 function MemberRow({
-  member, resending, busy, canDelete, canArchive,
+  member, window: windowStats, weeksInWindow, isAllTime,
+  resending, busy, canDelete, canArchive,
   onResend, onEdit, onArchive, onRestore, onDelete,
   actionsOpen, onToggleActions, onCloseActions,
 }: {
   member: TeamMember;
+  window: WindowStats | undefined;
+  weeksInWindow: number;
+  isAllTime: boolean;
   resending: boolean;
   busy: boolean;
   canDelete: boolean;
@@ -582,9 +625,12 @@ function MemberRow({
 }) {
   const initial = (member.first_name?.[0] ?? member.email?.[0] ?? '?').toUpperCase();
   const roleLabel = member.role.charAt(0).toUpperCase() + member.role.slice(1);
-  const tracked = Number.parseFloat(member.tracked_hours_this_week || '0');
-  const billable = Number.parseFloat(member.billable_hours_this_week || '0');
-  const capacity = Number.parseFloat(member.weekly_capacity_hours || '0');
+  const tracked = windowStats?.hours ?? 0;
+  const billable = windowStats?.billable ?? 0;
+  const weeklyCapacity = Number.parseFloat(member.weekly_capacity_hours || '0');
+  // Scale weekly capacity to the active window so utilization math matches
+  // what the summary card and report pages show.
+  const capacity = isAllTime ? weeklyCapacity : weeklyCapacity * weeksInWindow;
   const utilization = capacity > 0 ? Math.round((tracked / capacity) * 100) : 0;
   const utilPct = capacity > 0 ? Math.min((tracked / capacity) * 100, 100) : 0;
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -592,7 +638,7 @@ function MemberRow({
 
   return (
     <li
-      className={`grid grid-cols-1 items-center gap-3 px-5 py-4 transition hover:bg-slate-50/60 lg:grid-cols-[1fr_120px_120px_120px_120px_56px] ${
+      className={`grid grid-cols-1 items-center gap-3 px-5 py-4 transition last:rounded-b-2xl hover:bg-slate-50/60 lg:grid-cols-[1fr_120px_120px_120px_120px_56px] ${
         isArchived ? 'bg-slate-50/40' : ''
       }`}
     >

@@ -25,6 +25,19 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   SGD: 'S$',
 };
 
+/** Reactive hook — returns the workspace's currency symbol (₹, $, €, ...). */
+export function useCurrencySymbol(): string {
+  return useAccountSettingsStore(
+    (s) => CURRENCY_SYMBOL[s.settings?.currency ?? 'USD'] ?? '$',
+  );
+}
+
+/** Imperative version for non-React callers; reads the store snapshot once. */
+export function getCurrencySymbol(): string {
+  const code = useAccountSettingsStore.getState().settings?.currency ?? 'USD';
+  return CURRENCY_SYMBOL[code] ?? '$';
+}
+
 const NUMBER_FORMAT_LOCALE: Record<string, string> = {
   '1,234.56': 'en-US',
   '1.234,56': 'de-DE',

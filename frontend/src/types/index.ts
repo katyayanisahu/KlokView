@@ -323,6 +323,7 @@ export interface ProjectMemberEntry {
     email: string;
     full_name: string;
     role: Role;
+    weekly_capacity_hours?: string;
   };
   hourly_rate: string | null;
   is_project_manager: boolean;
@@ -471,6 +472,7 @@ export interface ProjectCreatePayload {
   billable_rate_strategy?: BillableRateStrategy;
   flat_billable_rate?: string | null;
   task_ids?: number[];
+  task_rates?: Record<string, string | null>;
   members?: Array<{ user_id: number; hourly_rate?: string | null; is_project_manager?: boolean }>;
 }
 

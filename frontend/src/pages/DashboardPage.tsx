@@ -1937,6 +1937,31 @@ export default function DashboardPage() {
     }
   };
 
+  // Manager/admin/owner action: undo an approval directly from the Timesheet
+  // view. Mirrors the "Withdraw approval" footer on the Approval tab but saves
+  // a tab switch when you've just approved your own (or someone's) timesheet.
+  const handleWithdrawApprovalFromTimesheet = async () => {
+    if (!activeSubmission || activeSubmission.status !== 'approved') return;
+    const ok = await ask({
+      title: 'Withdraw approval?',
+      message:
+        'This will unlock the entries and return the submission to pending so it can be re-decided.',
+      tone: 'warning',
+      confirmLabel: 'Withdraw approval',
+    });
+    if (!ok) return;
+    setSubmissionError(null);
+    setSubmissionBusy(true);
+    try {
+      await unapproveSubmission(activeSubmission.id);
+      refetchActiveSubmission();
+    } catch (err) {
+      setSubmissionError(extractApiError(err, 'Could not withdraw approval.'));
+    } finally {
+      setSubmissionBusy(false);
+    }
+  };
+
   // ---- Week grid helpers ----
   const cellKey = (projectId: number, taskId: number, dayIdx: number) =>
     `${projectId}:${taskId}:${dayIdx}`;
@@ -2288,9 +2313,21 @@ export default function DashboardPage() {
                     ) : null}
                   </>
                 ) : activeSubmission && activeSubmission.status === 'approved' ? (
-                  <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-accent-dark">
-                    Approved
-                  </span>
+                  <>
+                    <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-accent-dark">
+                      Approved
+                    </span>
+                    {canApprove ? (
+                      <button
+                        type="button"
+                        onClick={handleWithdrawApprovalFromTimesheet}
+                        disabled={submissionBusy}
+                        className="ml-1 inline-flex items-center rounded-md border border-primary/30 bg-white px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-primary-soft disabled:opacity-50"
+                      >
+                        {submissionBusy ? 'Withdrawing…' : 'Withdraw approval'}
+                      </button>
+                    ) : null}
+                  </>
                 ) : activeSubmission && activeSubmission.status === 'rejected' ? (
                   <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-danger/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-danger">
                     Rejected

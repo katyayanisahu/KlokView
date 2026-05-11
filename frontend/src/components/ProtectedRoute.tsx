@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 
+import SessionTimeoutManager from '@/components/SessionTimeoutManager';
 import Sidebar from '@/components/Sidebar';
 import TopBar from '@/components/TopBar';
 import { useAuthStore } from '@/store/authStore';
@@ -35,6 +36,7 @@ export default function ProtectedRoute({ children }: Props) {
         <TopBar onOpenNav={() => setNavOpen(true)} />
         {children}
       </div>
+      <SessionTimeoutManager />
     </div>
   );
 }

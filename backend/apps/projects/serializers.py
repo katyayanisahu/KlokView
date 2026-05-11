@@ -68,6 +68,7 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
             'email': obj.user.email,
             'full_name': obj.user.full_name,
             'role': obj.user.role,
+            'weekly_capacity_hours': str(obj.user.weekly_capacity_hours or 0),
         }
 
     def get_hours_logged(self, obj) -> str:
@@ -189,6 +190,11 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
     task_ids = serializers.ListField(
         child=serializers.IntegerField(), required=False, write_only=True
     )
+    task_rates = serializers.DictField(
+        child=serializers.CharField(allow_blank=True, allow_null=True, required=False),
+        required=False, write_only=True,
+        help_text='Optional per-task billable rate overrides. Keys = task IDs (as strings), values = decimal strings or null.',
+    )
     members = serializers.ListField(
         child=serializers.DictField(), required=False, write_only=True
     )
@@ -209,12 +215,13 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             'budget_includes_non_billable', 'budget_alert_percent',
             'billable_rate_strategy', 'flat_billable_rate',
             'is_active',
-            'task_ids', 'members',
+            'task_ids', 'task_rates', 'members',
         )
         read_only_fields = ('id',)
 
     def create(self, validated_data):
         task_ids = validated_data.pop('task_ids', None)
+        task_rates = validated_data.pop('task_rates', {}) or {}
         members_data = validated_data.pop('members', [])
         project = Project.objects.create(**validated_data)
 
@@ -229,7 +236,14 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             Task.objects.filter(account_id=account_id, id__in=task_ids).values_list('id', flat=True)
         )
         for task_id in valid_task_ids:
-            ProjectTask.objects.get_or_create(project=project, task_id=task_id)
+            override_rate = task_rates.get(str(task_id))
+            if override_rate in ('', None):
+                override_rate = None
+            ProjectTask.objects.get_or_create(
+                project=project,
+                task_id=task_id,
+                defaults={'billable_rate': override_rate},
+            )
 
         for entry in members_data:
             user_id = entry.get('user_id')

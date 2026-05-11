@@ -44,7 +44,7 @@ import { downloadCsv, timestampedFilename } from '@/components/reports/csvExport
 import { useAccountSettingsStore } from '@/store/accountSettingsStore';
 import { useAuthStore } from '@/store/authStore';
 import { extractApiError } from '@/utils/errors';
-import { formatBudget, formatCurrency } from '@/utils/format';
+import { formatBudget, formatCurrency, useCurrencySymbol } from '@/utils/format';
 import type { BudgetType, ProjectDetail, ProjectVisibility, Task, User } from '@/types';
 
 type TabKey = 'tasks' | 'team';
@@ -68,10 +68,20 @@ const RANGE_LABEL: Record<RangeKey, string> = {
   custom: 'Custom',
 };
 
-function computeRangeDates(range: RangeKey): { start?: string; end?: string } {
+function computeRangeDates(
+  range: RangeKey,
+  customStart?: string,
+  customEnd?: string,
+): { start?: string; end?: string } {
   const today = new Date();
   const iso = (d: Date) => d.toISOString().slice(0, 10);
-  if (range === 'all_time' || range === 'custom') {
+  if (range === 'custom') {
+    return {
+      start: customStart || iso(today),
+      end: customEnd || iso(today),
+    };
+  }
+  if (range === 'all_time') {
     return { start: '2000-01-01', end: iso(today) };
   }
   if (range === 'this_week') {
@@ -107,8 +117,7 @@ function computeRangeDates(range: RangeKey): { start?: string; end?: string } {
   return { start: iso(start), end: iso(end) };
 }
 
-function formatRangeHeader(range: Exclude<RangeKey, 'all_time' | 'custom'>): string {
-  const { start, end } = computeRangeDates(range);
+function formatDateRangeLabel(start?: string, end?: string): string {
   if (!start || !end) return '';
   const s = new Date(`${start}T00:00:00`);
   const e = new Date(`${end}T00:00:00`);
@@ -123,6 +132,11 @@ function formatRangeHeader(range: Exclude<RangeKey, 'all_time' | 'custom'>): str
     return `${s.getDate()} ${s.toLocaleDateString('en-US', monthFmt)} – ${e.getDate()} ${e.toLocaleDateString('en-US', monthFmt)} ${s.getFullYear()}`;
   }
   return `${s.toLocaleDateString('en-US', fullFmt)} – ${e.toLocaleDateString('en-US', fullFmt)}`;
+}
+
+function formatRangeHeader(range: Exclude<RangeKey, 'all_time' | 'custom'>): string {
+  const { start, end } = computeRangeDates(range);
+  return formatDateRangeLabel(start, end);
 }
 
 export default function ProjectDetailPage() {
@@ -143,6 +157,17 @@ export default function ProjectDetailPage() {
   const [tab, setTab] = useState<TabKey>('tasks');
   const [chartView, setChartView] = useState<ChartKey>('progress');
   const [range, setRange] = useState<RangeKey>('all_time');
+  const [chartRange, setChartRange] = useState<RangeKey>('this_week');
+  const [chartWindowHours, setChartWindowHours] = useState<number>(0);
+  const [chartWindowBillable, setChartWindowBillable] = useState<number>(0);
+  const [chartLoading, setChartLoading] = useState(false);
+  // Custom date pickers — default both pickers to current week so 'Custom'
+  // starts with a sensible range rather than empty inputs.
+  const initialCustom = useMemo(() => computeRangeDates('this_week'), []);
+  const [chartCustomStart, setChartCustomStart] = useState<string>(initialCustom.start ?? '');
+  const [chartCustomEnd, setChartCustomEnd] = useState<string>(initialCustom.end ?? '');
+  const [tableCustomStart, setTableCustomStart] = useState<string>(initialCustom.start ?? '');
+  const [tableCustomEnd, setTableCustomEnd] = useState<string>(initialCustom.end ?? '');
   const [showFullNotes, setShowFullNotes] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -175,6 +200,33 @@ export default function ProjectDetailPage() {
     const p = await getProject(projectId);
     setProject(p);
   };
+
+  // Refetch real hours for the chart whenever the chart range changes.
+  // Uses the same time-report endpoint as the task breakdown table so chart + table
+  // numbers stay consistent for the same window.
+  useEffect(() => {
+    if (Number.isNaN(projectId)) return;
+    let cancelled = false;
+    setChartLoading(true);
+    const { start, end } = computeRangeDates(chartRange, chartCustomStart, chartCustomEnd);
+    getTimeReport({ project_id: projectId, start, end })
+      .then((data) => {
+        if (cancelled) return;
+        setChartWindowHours(Number.parseFloat(data.totals.total_hours ?? '0'));
+        setChartWindowBillable(Number.parseFloat(data.totals.billable_hours ?? '0'));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setChartWindowHours(0);
+        setChartWindowBillable(0);
+      })
+      .finally(() => {
+        if (!cancelled) setChartLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, chartRange, chartCustomStart, chartCustomEnd]);
 
   const handleArchive = async () => {
     const ok = await ask({
@@ -302,12 +354,35 @@ export default function ProjectDetailPage() {
   const totalLogged = Number.parseFloat(project.total_hours_logged ?? '0');
   const billableLogged = Number.parseFloat(project.billable_hours_logged ?? '0');
   const nonBillableLogged = Number.parseFloat(project.non_billable_hours_logged ?? '0');
-  const hoursThisWeek = Number.parseFloat(project.hours_this_week ?? '0');
-  const avgHoursPerWeek = Number.parseFloat(project.avg_hours_per_week ?? '0');
   const spent = totalLogged;
   const remaining = budgetAmount - spent;
   const pct = budgetAmount > 0 ? Math.min((spent / budgetAmount) * 100, 100) : 0;
   const hasBudget = project.budget_type !== 'none' && budgetAmount > 0;
+
+  // Team utilization for the selected chart range:
+  // = hours logged in window / (sum of member weekly capacities × weeks in window) × 100
+  const teamUtilization = (() => {
+    const { start, end } = computeRangeDates(chartRange, chartCustomStart, chartCustomEnd);
+    if (!start || !end) return { pct: 0, capacity: 0, hasCapacity: false };
+    const days =
+      Math.max(
+        1,
+        Math.round(
+          (new Date(`${end}T00:00:00`).getTime() -
+            new Date(`${start}T00:00:00`).getTime()) /
+            86_400_000,
+        ) + 1,
+      );
+    const weeks = days / 7;
+    const totalCapacity = project.memberships.reduce((sum, m) => {
+      const cap = Number.parseFloat(m.user.weekly_capacity_hours ?? '0');
+      return sum + (Number.isFinite(cap) ? cap : 0);
+    }, 0);
+    const windowCapacity = totalCapacity * weeks;
+    if (windowCapacity <= 0) return { pct: 0, capacity: 0, hasCapacity: false };
+    const raw = (chartWindowHours / windowCapacity) * 100;
+    return { pct: raw, capacity: windowCapacity, hasCapacity: true };
+  })();
 
   return (
     <div className="min-h-screen bg-bg">
@@ -413,11 +488,11 @@ export default function ProjectDetailPage() {
           ) : null}
         </div>
 
-        {/* Chart + KPI metrics side-by-side on desktop, stacked on mobile.
-            Chart spans 2/3 on lg; the three KPI cards stack vertically in the right 1/3. */}
-        <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {/* KPI metrics row above, full-width chart below. Stacked layout gives the
+            chart maximum width and lets numbers + chart breathe vertically. */}
+        <div className="mb-6 grid grid-cols-1 gap-4">
         {/* Chart card */}
-        <section className="card overflow-hidden p-0 lg:col-span-2">
+        <section className="card order-2 overflow-hidden p-0">
           {/* Header: eyebrow + title + subtitle on left, pill segmented control on right */}
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 pb-4 pt-5">
             <div className="flex min-w-0 items-start gap-3">
@@ -443,76 +518,131 @@ export default function ProjectDetailPage() {
               </div>
             </div>
 
-            <div
-              role="tablist"
-              aria-label="Chart view"
-              className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={chartView === 'progress'}
-                onClick={() => setChartView('progress')}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                  chartView === 'progress'
-                    ? 'bg-white text-primary shadow-sm ring-1 ring-primary/15'
-                    : 'text-muted hover:text-text'
-                }`}
+            <div className="flex items-center gap-2">
+              <select
+                value={chartRange}
+                onChange={(e) => setChartRange(e.target.value as RangeKey)}
+                className="input w-auto py-1.5 text-sm"
+                aria-label="Chart time range"
               >
-                <TrendingUp className="h-3.5 w-3.5" />
-                Progress
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={chartView === 'hours'}
-                onClick={() => setChartView('hours')}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                  chartView === 'hours'
-                    ? 'bg-white text-primary shadow-sm ring-1 ring-primary/15'
-                    : 'text-muted hover:text-text'
-                }`}
+                {(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => (
+                  <option key={k} value={k}>
+                    {RANGE_LABEL[k]}
+                  </option>
+                ))}
+              </select>
+              <div
+                role="tablist"
+                aria-label="Chart view"
+                className="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1"
               >
-                <BarChart3 className="h-3.5 w-3.5" />
-                Hours
-              </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={chartView === 'progress'}
+                  onClick={() => setChartView('progress')}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                    chartView === 'progress'
+                      ? 'bg-primary text-white shadow-sm'
+                      : 'text-muted hover:text-text'
+                  }`}
+                >
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  Progress
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={chartView === 'hours'}
+                  onClick={() => setChartView('hours')}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                    chartView === 'hours'
+                      ? 'bg-primary text-white shadow-sm'
+                      : 'text-muted hover:text-text'
+                  }`}
+                >
+                  <BarChart3 className="h-3.5 w-3.5" />
+                  Hours
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* This-week / Avg-per-week inline chips — moved up from a heavy KPI strip into
-              the chart header area so the chart itself gets full vertical breathing room.
-              The right column already covers Total / Remaining / Utilization. */}
+          {/* Period summary chips — reflect the selected chart range. */}
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-slate-100 px-5 py-3 text-xs">
             <span className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
-              <span className="font-semibold uppercase tracking-wider text-muted">This week</span>
+              <span className="font-semibold uppercase tracking-wider text-muted">
+                {RANGE_LABEL[chartRange]} total
+              </span>
               <span className="font-bold tabular-nums text-text">
-                {hoursThisWeek.toFixed(2)} hr
+                {chartLoading ? '…' : `${chartWindowHours.toFixed(2)} hr`}
               </span>
             </span>
             <span className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
-              <span className="font-semibold uppercase tracking-wider text-muted">Avg / week</span>
+              <span className="font-semibold uppercase tracking-wider text-muted">Billable</span>
               <span className="font-bold tabular-nums text-text">
-                {avgHoursPerWeek.toFixed(2)} hr
+                {chartLoading ? '…' : `${chartWindowBillable.toFixed(2)} hr`}
               </span>
             </span>
           </div>
 
-          <div className="px-2 pb-4 pt-4">
+          {/* Range header — mirrors the table's "Week: 11 – 17 May 2026" pattern.
+              For 'custom' shows two date pickers. */}
+          {chartRange === 'custom' ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-100 px-5 py-3">
+              <h3 className="font-heading text-base font-bold text-text sm:text-lg">
+                {RANGE_LABEL[chartRange]}:
+              </h3>
+              <input
+                type="date"
+                value={chartCustomStart}
+                max={chartCustomEnd || undefined}
+                onChange={(e) => setChartCustomStart(e.target.value)}
+                className="input w-auto py-1.5 text-sm"
+                aria-label="Custom start date"
+              />
+              <span className="text-sm font-medium text-muted">to</span>
+              <input
+                type="date"
+                value={chartCustomEnd}
+                min={chartCustomStart || undefined}
+                onChange={(e) => setChartCustomEnd(e.target.value)}
+                className="input w-auto py-1.5 text-sm"
+                aria-label="Custom end date"
+              />
+              {chartCustomStart && chartCustomEnd ? (
+                <span className="text-sm font-medium text-muted">
+                  ({formatDateRangeLabel(chartCustomStart, chartCustomEnd)})
+                </span>
+              ) : null}
+            </div>
+          ) : chartRange !== 'all_time' ? (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-slate-100 px-5 py-3">
+              <h3 className="font-heading text-base font-bold text-text sm:text-lg">
+                {RANGE_LABEL[chartRange]}:
+              </h3>
+              <span className="text-sm font-medium text-muted">
+                {formatRangeHeader(chartRange)}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="px-4 pb-4 pt-4 sm:px-5">
             <ProjectChart
               kind={chartView}
               budgetAmount={budgetAmount}
               hasBudget={hasBudget}
+              windowHours={chartWindowHours}
+              rangeLabel={RANGE_LABEL[chartRange]}
             />
           </div>
         </section>
 
-        {/* KPI cards — stacked vertically in the right column on lg+,
-            flow into a 3-col grid on tablet, single column on mobile.
-            `auto-rows-fr` keeps the three cards equal-height on lg so the right
-            column reads as a tidy stack instead of three uneven blocks. */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:auto-rows-fr lg:grid-cols-1">
+        {/* KPI cards — horizontal 3-card strip at top. Stacks on mobile.
+            `auto-rows-fr` keeps the three cards equal-height. */}
+        <div className="order-1 grid grid-cols-1 gap-4 sm:auto-rows-fr sm:grid-cols-3">
           {(() => {
             const billablePct = totalLogged > 0 ? (billableLogged / totalLogged) * 100 : 0;
             return (
@@ -638,23 +768,81 @@ export default function ProjectDetailPage() {
             );
           })()}
 
-          <div className="card relative flex h-full flex-col overflow-hidden p-5 transition hover:shadow-lg">
-            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-slate-300 to-slate-200" />
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
-                  Team utilization
-                </p>
-                <p className="mt-2 font-heading text-3xl font-bold tabular-nums text-text">—</p>
+          {(() => {
+            const utilPct = teamUtilization.pct;
+            const utilOver = utilPct > 100;
+            const utilWarn = !utilOver && utilPct >= 80;
+            const utilTone = utilOver
+              ? 'text-danger'
+              : utilWarn
+                ? 'text-warning'
+                : teamUtilization.hasCapacity
+                  ? 'text-text'
+                  : 'text-muted';
+            const utilIconBg = utilOver
+              ? 'bg-danger/10 text-danger'
+              : utilWarn
+                ? 'bg-warning/10 text-warning'
+                : teamUtilization.hasCapacity
+                  ? 'bg-primary-soft text-primary'
+                  : 'bg-slate-100 text-muted';
+            const utilBarColor = utilOver
+              ? 'bg-danger'
+              : utilWarn
+                ? 'bg-warning'
+                : 'bg-primary';
+            const utilStripe = utilOver
+              ? 'from-danger to-danger/40'
+              : utilWarn
+                ? 'from-warning to-warning/40'
+                : teamUtilization.hasCapacity
+                  ? 'from-primary to-primary/40'
+                  : 'from-slate-300 to-slate-200';
+            return (
+              <div className="card relative flex h-full flex-col overflow-hidden p-5 transition hover:shadow-lg">
+                <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${utilStripe}`} />
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                      Team utilization
+                    </p>
+                    <p className={`mt-2 font-heading text-3xl font-bold tabular-nums ${utilTone}`}>
+                      {utilPct.toFixed(teamUtilization.hasCapacity ? 1 : 0)}
+                      <span className="ml-0.5 text-base font-medium text-muted">%</span>
+                    </p>
+                  </div>
+                  <div
+                    className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${utilIconBg}`}
+                  >
+                    <Users className="h-5 w-5" />
+                  </div>
+                </div>
+                <div className="mt-auto pt-4">
+                  <div className="flex h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={`${utilBarColor} transition-all`}
+                      style={{ width: `${Math.min(utilPct, 100)}%` }}
+                    />
+                  </div>
+                  <p className="mt-2.5 text-xs text-muted">
+                    {teamUtilization.hasCapacity ? (
+                      <>
+                        <span className="font-semibold text-text">
+                          {chartWindowHours.toFixed(2)} hr
+                        </span>{' '}
+                        / {teamUtilization.capacity.toFixed(0)} hr capacity ·{' '}
+                        {RANGE_LABEL[chartRange]}
+                      </>
+                    ) : project.memberships.length === 0 ? (
+                      'No team members assigned to this project.'
+                    ) : (
+                      'Set weekly capacity on team members to see utilization.'
+                    )}
+                  </p>
+                </div>
               </div>
-              <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-muted">
-                <Users className="h-5 w-5" />
-              </div>
-            </div>
-            <p className="mt-auto pt-3 text-xs text-muted">
-              % of team capacity logged on this project. Lights up when time entries are wired in.
-            </p>
-          </div>
+            );
+          })()}
         </div>
         </div>
 
@@ -706,8 +894,36 @@ export default function ProjectDetailPage() {
           </div>
         </div>
 
-        {/* Period range header — shown only for specific periods (skip 'all_time' / 'custom') */}
-        {range !== 'all_time' && range !== 'custom' ? (
+        {/* Period range header — shows date range for fixed periods, date pickers for 'custom'. */}
+        {range === 'custom' ? (
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h3 className="font-heading text-base font-bold text-text sm:text-lg">
+              {RANGE_LABEL[range]}:
+            </h3>
+            <input
+              type="date"
+              value={tableCustomStart}
+              max={tableCustomEnd || undefined}
+              onChange={(e) => setTableCustomStart(e.target.value)}
+              className="input w-auto py-1.5 text-sm"
+              aria-label="Custom start date"
+            />
+            <span className="text-sm font-medium text-muted">to</span>
+            <input
+              type="date"
+              value={tableCustomEnd}
+              min={tableCustomStart || undefined}
+              onChange={(e) => setTableCustomEnd(e.target.value)}
+              className="input w-auto py-1.5 text-sm"
+              aria-label="Custom end date"
+            />
+            {tableCustomStart && tableCustomEnd ? (
+              <span className="text-sm font-medium text-muted">
+                ({formatDateRangeLabel(tableCustomStart, tableCustomEnd)})
+              </span>
+            ) : null}
+          </div>
+        ) : range !== 'all_time' ? (
           <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <h3 className="font-heading text-base font-bold text-text sm:text-lg">
               {RANGE_LABEL[range]}:
@@ -720,9 +936,23 @@ export default function ProjectDetailPage() {
 
         <div className="py-6">
           {tab === 'tasks' ? (
-            <TasksPanel project={project} canEdit={canEdit} range={range} onChange={refreshProject} />
+            <TasksPanel
+              project={project}
+              canEdit={canEdit}
+              range={range}
+              customStart={tableCustomStart}
+              customEnd={tableCustomEnd}
+              onChange={refreshProject}
+            />
           ) : (
-            <TeamPanel project={project} canEdit={canEdit} range={range} onChange={refreshProject} />
+            <TeamPanel
+              project={project}
+              canEdit={canEdit}
+              range={range}
+              customStart={tableCustomStart}
+              customEnd={tableCustomEnd}
+              onChange={refreshProject}
+            />
           )}
         </div>
       </main>
@@ -936,46 +1166,65 @@ function ProjectChart({
   kind,
   budgetAmount,
   hasBudget,
+  windowHours,
+  rangeLabel,
 }: {
   kind: ChartKey;
   budgetAmount: number;
   hasBudget: boolean;
+  windowHours: number;
+  rangeLabel: string;
 }) {
-  // Width/height in viewBox units
-  const W = 900;
+  // Width/height in viewBox units — wider aspect to match the full-width container
+  // (chart now sits in a stacked layout, not 2/3 column).
+  // padL is sized to fit the widest y-label without clipping.
+  const W = 1200;
   const H = 280;
-  const padL = 60;
-  const padR = 24;
-  const padT = 30;
-  const padB = 30;
+  const padL = 80;
+  const padR = 48;
+  const padT = 36;
+  const padB = 32;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
-  // Determine y-axis scale
-  const yMax = hasBudget && budgetAmount > 0 ? budgetAmount * 1.1 : kind === 'progress' ? 20000 : 40;
-  const ticks = 4;
-  const tickValues = Array.from({ length: ticks + 1 }, (_, i) => (yMax / ticks) * i);
-
-  // X axis: 8 weeks
+  // X axis: 8 weeks with This week sitting in the middle
   const weeks = 8;
   const thisWeekIdx = 5;
 
-  // Sample data — until Epic 2 wires real time entries.
-  const progressSeries = Array.from({ length: weeks }, (_, i) =>
-    Math.min(yMax * 0.95, (yMax * 0.92 * (i + 1)) / weeks),
-  );
-  const hoursSeries = [4, 8, 12, 14, 18, 22, 26, 28];
+  // Round up to a sensible upper bound so y-axis ticks land on clean numbers.
+  const niceCeil = (raw: number): number => {
+    if (raw <= 0) return 10;
+    if (raw <= 5) return 5;
+    if (raw <= 10) return 10;
+    if (raw <= 20) return 20;
+    if (raw <= 50) return 50;
+    if (raw <= 100) return 100;
+    if (raw <= 250) return 250;
+    if (raw <= 500) return 500;
+    if (raw <= 1000) return 1000;
+    return Math.ceil(raw / 500) * 500;
+  };
 
-  const series = kind === 'progress' ? progressSeries : hoursSeries;
-  const seriesMax = kind === 'progress' ? yMax : Math.max(...hoursSeries) * 1.2;
+  // Y-axis scale derived from REAL data (budget + logged hours), not synthetic defaults.
+  const yMaxRaw =
+    kind === 'progress'
+      ? Math.max(hasBudget ? budgetAmount * 1.1 : 0, windowHours * 1.3, 10)
+      : Math.max(windowHours * 1.5, 10);
+  const yMax = niceCeil(yMaxRaw);
+  const ticks = 4;
+  const tickValues = Array.from({ length: ticks + 1 }, (_, i) => (yMax / ticks) * i);
+
+  const seriesMax = yMax;
   const yScale = (v: number) => padT + innerH - (v / seriesMax) * innerH;
   const xScale = (i: number) => padL + (innerW * i) / (weeks - 1);
 
-  const pathD = series
-    .map((v, i) => `${i === 0 ? 'M' : 'L'} ${xScale(i)} ${yScale(v)}`)
-    .join(' ');
+  // Both views plot the hours logged in the selected window — keeps the chart in sync
+  // with the period summary chips and team utilization card.
+  const currentValue = windowHours;
+  const hasValue = currentValue > 0;
 
   const fmtY = (v: number) => `${Math.round(v)}h`;
+  const fmtValue = (v: number) => `${v.toFixed(2)} hr`;
 
   // x-axis labels: This week sits in the middle
   const today = new Date();
@@ -994,7 +1243,7 @@ function ProjectChart({
 
   return (
     <div className="w-full">
-      <svg viewBox={`0 0 ${W} ${H}`} className="block h-72 w-full">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block h-80 w-full">
         {/* gridlines + y labels */}
         {tickValues.map((v, i) => {
           const y = padT + innerH - (v / seriesMax) * innerH;
@@ -1009,11 +1258,11 @@ function ProjectChart({
                 strokeWidth={1}
               />
               <text
-                x={padL - 8}
-                y={y + 4}
+                x={padL - 10}
+                y={y + 5}
                 textAnchor="end"
                 className="fill-text/80"
-                fontSize={14}
+                fontSize={16}
                 fontWeight={500}
               >
                 {fmtY(v)}
@@ -1022,24 +1271,27 @@ function ProjectChart({
           );
         })}
 
-        {/* This week highlight band */}
-        <rect
-          x={xScale(thisWeekIdx) - 30}
-          y={padT}
-          width={60}
-          height={innerH}
-          fill="#DEEBFF"
-          opacity={0.6}
+        {/* "This week" position marker — just a dashed vertical line + label.
+            No filled band, to avoid being mistaken for a data bar. */}
+        <line
+          x1={xScale(thisWeekIdx)}
+          x2={xScale(thisWeekIdx)}
+          y1={padT}
+          y2={padT + innerH}
+          stroke="#0052CC"
+          strokeWidth={1.5}
+          strokeDasharray="4 5"
+          opacity={0.55}
         />
         <text
           x={xScale(thisWeekIdx)}
-          y={padT - 8}
+          y={padT - 10}
           textAnchor="middle"
           className="fill-primary"
-          fontSize={13}
+          fontSize={15}
           fontWeight={700}
         >
-          This week
+          {rangeLabel}
         </text>
 
         {/* Budget label (progress mode) */}
@@ -1056,17 +1308,17 @@ function ProjectChart({
             />
             <rect
               x={padL + 6}
-              y={yScale(budgetAmount) - 22}
-              width={130}
-              height={22}
+              y={yScale(budgetAmount) - 26}
+              width={160}
+              height={26}
               rx={4}
               fill="#172B4D"
             />
             <text
-              x={padL + 14}
-              y={yScale(budgetAmount) - 6}
+              x={padL + 16}
+              y={yScale(budgetAmount) - 8}
               fill="#fff"
-              fontSize={13}
+              fontSize={15}
               fontWeight={700}
             >
               Budget: {fmtY(budgetAmount)}
@@ -1074,51 +1326,90 @@ function ProjectChart({
           </g>
         ) : null}
 
-        {/* Series line */}
-        {kind === 'progress' ? (
-          <path d={pathD} fill="none" stroke="#172B4D" strokeWidth={2} />
-        ) : (
-          // bar series for hours
-          series.map((v, i) => {
-            const barW = innerW / (weeks * 1.6);
-            const x = xScale(i) - barW / 2;
-            const y = yScale(v);
-            return (
+        {/* Real data — single point at the current week. Other weeks are blank
+            because we don't have historical weekly aggregates yet. */}
+        {hasValue && kind === 'progress' ? (
+          <g>
+            <circle
+              cx={xScale(thisWeekIdx)}
+              cy={yScale(currentValue)}
+              r={7}
+              fill="#0052CC"
+              stroke="#fff"
+              strokeWidth={2.5}
+            />
+            <rect
+              x={xScale(thisWeekIdx) - 50}
+              y={yScale(currentValue) - 38}
+              width={100}
+              height={26}
+              rx={4}
+              fill="#172B4D"
+            />
+            <text
+              x={xScale(thisWeekIdx)}
+              y={yScale(currentValue) - 20}
+              textAnchor="middle"
+              fill="#fff"
+              fontSize={15}
+              fontWeight={700}
+            >
+              {fmtValue(currentValue)}
+            </text>
+          </g>
+        ) : null}
+
+        {hasValue && kind === 'hours' ? (() => {
+          const barW = innerW / (weeks * 1.6);
+          const x = xScale(thisWeekIdx) - barW / 2;
+          const y = yScale(currentValue);
+          return (
+            <g>
               <rect
-                key={i}
                 x={x}
                 y={y}
                 width={barW}
                 height={padT + innerH - y}
-                fill={i === thisWeekIdx ? '#0052CC' : '#5CDCA5'}
+                fill="#0052CC"
                 rx={3}
               />
-            );
-          })
-        )}
+              <text
+                x={xScale(thisWeekIdx)}
+                y={y - 10}
+                textAnchor="middle"
+                className="fill-text"
+                fontSize={15}
+                fontWeight={700}
+              >
+                {fmtValue(currentValue)}
+              </text>
+            </g>
+          );
+        })() : null}
 
-        {/* Series points */}
-        {kind === 'progress'
-          ? series.map((v, i) => (
-              <circle
-                key={i}
-                cx={xScale(i)}
-                cy={yScale(v)}
-                r={3.5}
-                fill="#172B4D"
-              />
-            ))
-          : null}
+        {/* Empty state — when no hours logged yet */}
+        {!hasValue ? (
+          <text
+            x={padL + innerW / 2}
+            y={padT + innerH / 2}
+            textAnchor="middle"
+            className="fill-muted"
+            fontSize={18}
+            fontWeight={500}
+          >
+            No hours logged yet
+          </text>
+        ) : null}
 
         {/* x-axis labels */}
         {xLabels.map(({ i, label }) => (
           <text
             key={i}
             x={xScale(i)}
-            y={H - 6}
+            y={H - 8}
             textAnchor="middle"
             className="fill-text/80"
-            fontSize={14}
+            fontSize={17}
             fontWeight={500}
           >
             {label}
@@ -1134,11 +1425,15 @@ function TasksPanel({
   project,
   canEdit,
   range,
+  customStart,
+  customEnd,
   onChange,
 }: {
   project: ProjectDetail;
   canEdit: boolean;
   range: RangeKey;
+  customStart?: string;
+  customEnd?: string;
   onChange: () => void;
 }) {
   const [allTasks, setAllTasks] = useState<Task[]>([]);
@@ -1155,7 +1450,7 @@ function TasksPanel({
   useEffect(() => {
     let cancelled = false;
     setBreakdownLoading(true);
-    const { start, end } = computeRangeDates(range);
+    const { start, end } = computeRangeDates(range, customStart, customEnd);
     getTimeReport({ project_id: project.id, start, end })
       .then((data) => {
         if (!cancelled) setBreakdown(data.task_breakdown ?? []);
@@ -1170,7 +1465,7 @@ function TasksPanel({
       cancelled = true;
     };
     // Re-fetch when the project's task list changes (so newly added/removed tasks appear).
-  }, [project.id, project.project_tasks.length, range]);
+  }, [project.id, project.project_tasks.length, range, customStart, customEnd]);
 
   const breakdownById = useMemo(() => {
     const map = new Map<number, TaskBreakdownRow>();
@@ -1231,15 +1526,14 @@ function TasksPanel({
     const bd =
       (pt.task_id !== undefined ? breakdownById.get(pt.task_id) : undefined) ??
       breakdownByName.get(pt.task_name);
-    // When the breakdown returns data, trust it (it's date-filtered to the range).
-    // Only fall back to pt.hours_logged (all-time) when the breakdown is still loading
-    // or returned no rows at all — otherwise zero means "no hours in this range".
-    const hasAnyBreakdown = breakdown.length > 0;
+    // Trust the date-filtered breakdown once it has loaded. While loading we
+    // show the all-time hours as a placeholder; after the response arrives,
+    // an absent task means "no hours in this window" (not "fall back to lifetime").
     const hoursRaw = bd
       ? bd.hours
-      : hasAnyBreakdown
-        ? '0'
-        : (pt.hours_logged ?? '0');
+      : breakdownLoading
+        ? (pt.hours_logged ?? '0')
+        : '0';
     return {
       projectTaskId: pt.id,
       taskId: pt.task_id ?? bd?.id,
@@ -1493,11 +1787,15 @@ function TeamPanel({
   project,
   canEdit,
   range,
+  customStart,
+  customEnd,
   onChange,
 }: {
   project: ProjectDetail;
   canEdit: boolean;
   range: RangeKey;
+  customStart?: string;
+  customEnd?: string;
   onChange: () => void;
 }) {
   const [users, setUsers] = useState<User[]>([]);
@@ -1505,6 +1803,7 @@ function TeamPanel({
   const [breakdown, setBreakdown] = useState<TeamBreakdownRow[]>([]);
   const [breakdownLoading, setBreakdownLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const currencySymbol = useCurrencySymbol();
 
   useEffect(() => {
     listUsers().then(setUsers);
@@ -1513,7 +1812,7 @@ function TeamPanel({
   useEffect(() => {
     let cancelled = false;
     setBreakdownLoading(true);
-    const { start, end } = computeRangeDates(range);
+    const { start, end } = computeRangeDates(range, customStart, customEnd);
     getTimeReport({ project_id: project.id, start, end })
       .then((data) => {
         if (!cancelled) setBreakdown(data.team_breakdown ?? []);
@@ -1527,7 +1826,7 @@ function TeamPanel({
     return () => {
       cancelled = true;
     };
-  }, [project.id, project.memberships.length, range]);
+  }, [project.id, project.memberships.length, range, customStart, customEnd]);
 
   const breakdownByUserId = useMemo(() => {
     const map = new Map<number, TeamBreakdownRow>();
@@ -1580,6 +1879,7 @@ function TeamPanel({
     email: string;
     role: string;
     isProjectManager: boolean;
+    hourlyRate: string;
     hours: number;
     billableAmount: number;
     cost: number;
@@ -1600,12 +1900,23 @@ function TeamPanel({
       email: m.user.email,
       role: m.user.role,
       isProjectManager: m.is_project_manager,
+      hourlyRate: m.hourly_rate ?? '',
       hours: Number.parseFloat(hoursRaw) || 0,
       billableAmount: Number.parseFloat(bd?.billable_amount ?? '0') || 0,
       cost: Number.parseFloat(bd?.cost ?? '0') || 0,
       tasks: bd?.tasks ?? [],
     };
   });
+
+  const handleSaveRate = async (userId: number, rate: string) => {
+    const membership = project.memberships.find((m) => m.user.id === userId);
+    await addProjectMember(project.id, {
+      user_id: userId,
+      hourly_rate: rate.trim() === '' ? null : rate.trim(),
+      is_project_manager: membership?.is_project_manager ?? false,
+    });
+    onChange();
+  };
 
   const totals = rows.reduce(
     (acc, r) => ({
@@ -1625,6 +1936,9 @@ function TeamPanel({
               <th className="w-10 px-3 py-3" />
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3 text-right">Hours</th>
+              {project.billable_rate_strategy === 'person' ? (
+                <th className="px-4 py-3 text-right">Rate (per hr)</th>
+              ) : null}
               <th className="px-4 py-3 text-right">Billable amount</th>
               <th className="px-4 py-3 text-right">Costs</th>
               <th className="px-4 py-3 text-center">Manages</th>
@@ -1634,7 +1948,10 @@ function TeamPanel({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-10 text-center text-sm text-muted">
+                <td
+                  colSpan={project.billable_rate_strategy === 'person' ? 8 : 7}
+                  className="px-6 py-10 text-center text-sm text-muted"
+                >
                   No team members yet.
                 </td>
               </tr>
@@ -1680,6 +1997,35 @@ function TeamPanel({
                           {row.hours.toFixed(2)}
                         </Link>
                       </td>
+                      {project.billable_rate_strategy === 'person' ? (
+                        <td className="px-4 py-3 text-right">
+                          <div className="relative ml-auto w-24">
+                            <span
+                              className={`pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted ${
+                                !canEdit ? 'opacity-40' : ''
+                              }`}
+                            >
+                              {currencySymbol}
+                            </span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              defaultValue={row.hourlyRate}
+                              disabled={!canEdit}
+                              onBlur={(e) => {
+                                const next = e.target.value;
+                                if (next !== row.hourlyRate) {
+                                  handleSaveRate(row.userId, next);
+                                }
+                              }}
+                              placeholder="0.00"
+                              className="input w-full py-1 pl-6 text-right text-sm tabular-nums disabled:opacity-40"
+                              aria-label={`Hourly rate for ${row.name}`}
+                            />
+                          </div>
+                        </td>
+                      ) : null}
                       <td className="px-4 py-3 text-right font-semibold tabular-nums text-text">
                         {formatCurrency(row.billableAmount)}
                       </td>
@@ -1711,7 +2057,10 @@ function TeamPanel({
                     {isOpen && row.tasks.length === 0 ? (
                       <tr className="border-b border-slate-100 bg-slate-50/40">
                         <td className="px-3 py-2.5" />
-                        <td colSpan={6} className="px-4 py-2.5 pl-10 text-xs italic text-muted">
+                        <td
+                          colSpan={project.billable_rate_strategy === 'person' ? 7 : 6}
+                          className="px-4 py-2.5 pl-10 text-xs italic text-muted"
+                        >
                           {breakdownLoading
                             ? 'Loading task breakdown…'
                             : 'No task breakdown available for this member yet.'}
@@ -1739,6 +2088,9 @@ function TeamPanel({
                                 {Number.parseFloat(t.hours).toFixed(2)}
                               </Link>
                             </td>
+                            {project.billable_rate_strategy === 'person' ? (
+                              <td className="px-4 py-2.5" />
+                            ) : null}
                             <td className="px-4 py-2.5 text-right tabular-nums text-text">
                               {formatCurrency(t.billable_amount || '0')}
                             </td>
@@ -1761,6 +2113,9 @@ function TeamPanel({
                 <td className="px-4 py-3 text-right tabular-nums text-text">
                   {totals.hours.toFixed(2)}
                 </td>
+                {project.billable_rate_strategy === 'person' ? (
+                  <td className="px-4 py-3" />
+                ) : null}
                 <td className="px-4 py-3 text-right tabular-nums text-text">
                   {formatCurrency(totals.billableAmount)}
                 </td>

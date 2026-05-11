@@ -2,6 +2,7 @@ import {
   Archive,
   CheckSquare,
   ChevronDown,
+  DollarSign,
   Download,
   Edit3,
   ListTodo,
@@ -547,8 +548,8 @@ function TaskGroup({
   const headerBg = 'bg-primary-soft';
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md">
-      <div className={`grid grid-cols-[24px_auto_1fr_auto] items-center gap-3 border-b border-slate-200 px-4 py-4 sm:gap-4 sm:px-6 ${headerBg}`}>
+    <div className="rounded-xl border border-slate-200 bg-white shadow-md">
+      <div className={`grid grid-cols-[24px_auto_1fr_auto] items-center gap-3 rounded-t-xl border-b border-slate-200 px-4 py-4 sm:gap-4 sm:px-6 ${headerBg}`}>
         <div className="flex items-center">
           {canEdit ? (
             <GroupCheckbox state={groupState} onChange={onToggleGroup} disabled={tasks.length === 0} />
@@ -578,7 +579,7 @@ function TaskGroup({
           return (
             <div
               key={t.id}
-              className={`grid grid-cols-[24px_1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-3.5 text-sm last:border-b-0 transition sm:gap-4 sm:px-6 ${
+              className={`grid grid-cols-[24px_1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-3.5 text-sm transition last:rounded-b-xl last:border-b-0 sm:gap-4 sm:px-6 ${
                 checked ? 'bg-warning/10' : 'hover:bg-slate-50/70'
               }`}
             >
@@ -706,6 +707,9 @@ function TaskModal({
   const [name, setName] = useState(initial?.name ?? '');
   const [isDefault, setIsDefault] = useState(initial?.is_default ?? false);
   const [isBillable, setIsBillable] = useState(initial?.default_is_billable ?? true);
+  const [defaultBillableRate, setDefaultBillableRate] = useState(
+    initial?.default_billable_rate ?? '',
+  );
   const [saving, setSaving] = useState(false);
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
@@ -721,6 +725,9 @@ function TaskModal({
       name: name.trim(),
       is_default: isDefault,
       default_is_billable: isBillable,
+      default_billable_rate: isBillable && defaultBillableRate.trim() !== ''
+        ? defaultBillableRate.trim()
+        : null,
     };
     try {
       const saved = initial
@@ -785,6 +792,33 @@ function TaskModal({
             <p className="-mt-2 text-xs text-muted">
               Used to classify hours in reports — billable vs non-billable utilization.
             </p>
+
+            {isBillable ? (
+              <div>
+                <label htmlFor="default_billable_rate" className="label">
+                  Default billable rate <span className="font-normal text-muted">(optional)</span>
+                </label>
+                <div className="relative w-full max-w-[220px]">
+                  <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                  <input
+                    id="default_billable_rate"
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={defaultBillableRate}
+                    onChange={(e) => setDefaultBillableRate(e.target.value)}
+                    className="input pl-9 pr-12"
+                    placeholder="0.00"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted">
+                    / hr
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted">
+                  Used when a project's billable rate strategy is set to <span className="font-medium">Task billable rate</span>. Leave empty to track hours as non-billable.
+                </p>
+              </div>
+            ) : null}
           </div>
 
           {errMsg ? (

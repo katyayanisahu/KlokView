@@ -50,6 +50,71 @@ function apiRowToView(r: ApiProfitabilityRow): ProfitabilityRow {
 
 type SubView = 'clients' | 'projects' | 'team' | 'tasks';
 
+interface TrendPoint {
+  label: string;
+  revenue: number;
+  cost: number;
+  profit: number;
+}
+
+// Split the active range into bins for the trend chart, based on the selected period:
+// - week / semimonth / month → 1 bin (the window itself)
+// - quarter → up to 3 monthly bins
+// - year → up to 12 monthly bins
+// - all_time → 1 bin (range is unbounded; bucketing would be unbounded too)
+// - custom → 1 bin if ≤ 31 days, else monthly bins capped at 12
+function computeChartBins(
+  period: Period,
+  range: { start: string; end: string },
+): { start: string; end: string; label: string }[] {
+  const MONTH_NAMES = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  const start = new Date(`${range.start}T00:00:00`);
+  const end = new Date(`${range.end}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+
+  const iso = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const singleBin = () => [{
+    start: range.start,
+    end: range.end,
+    label: formatRangeLabel(range.start, range.end),
+  }];
+
+  if (period === 'week' || period === 'semimonth' || period === 'month' || period === 'all_time') {
+    return singleBin();
+  }
+
+  if (period === 'custom') {
+    const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    if (days <= 31) return singleBin();
+  }
+
+  // Monthly bins between start and end, clipped to the actual window.
+  const bins: { start: string; end: string; label: string }[] = [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  while (cursor <= end && bins.length < 12) {
+    const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+    const binStart = monthStart < start ? start : monthStart;
+    const binEnd = monthEnd > end ? end : monthEnd;
+    bins.push({
+      start: iso(binStart),
+      end: iso(binEnd),
+      label: `${MONTH_NAMES[cursor.getMonth()]} ${cursor.getFullYear()}`,
+    });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return bins.length > 0 ? bins : singleBin();
+}
+
 const SUB_VIEWS: { key: SubView; label: string }[] = [
   { key: 'clients', label: 'Clients' },
   { key: 'projects', label: 'Projects' },
@@ -96,6 +161,7 @@ export default function ProfitabilityReportPage() {
   const [projectType, setProjectType] = useState<ProjectTypeFilter>('');
   const [projectManagerId, setProjectManagerId] = useState<string>('');
   const [team, setTeam] = useState<TeamMember[]>([]);
+  const [trendData, setTrendData] = useState<TrendPoint[] | null>(null);
 
   // Load potential project managers for the dropdown.
   useEffect(() => {
@@ -114,10 +180,21 @@ export default function ProfitabilityReportPage() {
 
   const weekStartsOn = useWeekStart();
   const fiscalStartMonth = useFiscalYearStartMonth();
-  const range = useMemo(
-    () => computeRange(period, anchor, weekStartsOn, fiscalStartMonth),
-    [period, anchor, weekStartsOn, fiscalStartMonth],
-  );
+  // Custom date pickers — default to current month so "Custom" starts sensibly.
+  const todayIso = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+  const monthStartIso = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  }, []);
+  const [customStart, setCustomStart] = useState<string>(monthStartIso);
+  const [customEnd, setCustomEnd] = useState<string>(todayIso);
+  const range = useMemo(() => {
+    if (period === 'custom') return { start: customStart, end: customEnd };
+    return computeRange(period, anchor, weekStartsOn, fiscalStartMonth);
+  }, [period, anchor, weekStartsOn, fiscalStartMonth, customStart, customEnd]);
   const isAllTime = period === 'all_time';
 
   useEffect(() => {
@@ -212,6 +289,55 @@ export default function ProfitabilityReportPage() {
     if (drilldownProjectId !== null) setDrilldownSubView('tasks');
     else if (drilldownClientId !== null) setDrilldownSubView('projects');
   }, [drilldownClientId, drilldownProjectId]);
+
+  // Trend chart: fetch profitability totals for each bin within the active window
+  // so the chart reflects the same filters as the rest of the page.
+  useEffect(() => {
+    if (isAllTime) {
+      setTrendData(null);
+      return;
+    }
+    let cancelled = false;
+    const bins = computeChartBins(period, range);
+    if (bins.length === 0) {
+      setTrendData([]);
+      return;
+    }
+    Promise.all(
+      bins.map((bin) =>
+        getProfitabilityReport({
+          start: bin.start,
+          end: bin.end,
+          project_status: projectStatus || undefined,
+          project_type: projectType || undefined,
+          project_manager_id: projectManagerId ? Number.parseInt(projectManagerId, 10) : undefined,
+          client_id: drilldownClientId ?? undefined,
+          project_id: drilldownProjectId ?? undefined,
+        })
+          .then((data) => ({
+            label: bin.label,
+            revenue: Number.parseFloat(data.totals.revenue) || 0,
+            cost: Number.parseFloat(data.totals.cost) || 0,
+            profit: Number.parseFloat(data.totals.profit) || 0,
+          }))
+          .catch(() => ({
+            label: bin.label,
+            revenue: 0,
+            cost: 0,
+            profit: 0,
+          })),
+      ),
+    ).then((points) => {
+      if (!cancelled) setTrendData(points);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    period, range.start, range.end, isAllTime,
+    projectStatus, projectType, projectManagerId,
+    drilldownClientId, drilldownProjectId,
+  ]);
 
   const canNudge = !['all_time', 'custom'].includes(period);
   const handlePrev = canNudge ? () => setAnchor((a) => nudgeAnchor(a, period, -1)) : undefined;
@@ -376,32 +502,30 @@ export default function ProfitabilityReportPage() {
             rangeLabel={rangeLabel}
             onPrev={handlePrev}
             onNext={handleNext}
+            customStart={customStart}
+            customEnd={customEnd}
+            onCustomChange={(s, e) => {
+              setCustomStart(s);
+              setCustomEnd(e);
+            }}
           />
         </div>
 
-        <div className="px-4 pb-4 pt-4 sm:px-6">
-        {/* Warning banner — surfaces missing rates that would otherwise zero out the math */}
+        <div className="px-4 pb-4 pt-3 sm:px-6">
+        {/* Show "loading" hint while fetching; only surface a banner when there's
+            a real load error. The old always-on "missing dates and rates" banner
+            was a placeholder with no real signal behind it and has been removed. */}
         {loading ? (
-          <div className="rounded-lg bg-bg/40 px-3 py-2 text-xs text-muted">Loading…</div>
+          <div className="mb-3 rounded-lg bg-bg/40 px-3 py-2 text-xs text-muted">Loading…</div>
         ) : loadError ? (
-          <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
             <p className="text-text/80">{loadError}</p>
           </div>
-        ) : (
-          <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-            <p className="text-text/80">
-              Some of the data in this timeframe cannot be accurately calculated because there are missing dates and rates.{' '}
-              <button type="button" className="font-semibold text-primary hover:underline">
-                Add missing dates and rates
-              </button>
-            </p>
-          </div>
-        )}
+        ) : null}
 
         {/* Filter dropdowns */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={projectStatus}
             onChange={(e) => setProjectStatus(e.target.value as ProjectStatusFilter)}
@@ -502,9 +626,9 @@ export default function ProfitabilityReportPage() {
                   ? `${drilldownClient.name} — profit`
                   : 'Company profit over this period'}
             </h3>
-            <p className="text-xs text-muted">Tracked time</p>
+            <p className="text-sm text-muted">Tracked time</p>
           </div>
-          <div className="flex flex-wrap items-center gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <LegendDot color="#10B981" label="Revenue" />
             <LegendDot color="#EF4444" label="Costs" />
             <span className="flex items-center gap-1.5">
@@ -514,7 +638,21 @@ export default function ProfitabilityReportPage() {
           </div>
         </div>
         <div className="mt-4 overflow-x-auto">
-          <ProfitTrendChart />
+          <ProfitTrendChart
+            data={
+              trendData ??
+              (activeReport
+                ? [
+                    {
+                      label: rangeLabel,
+                      revenue: Number.parseFloat(activeReport.totals.revenue) || 0,
+                      cost: Number.parseFloat(activeReport.totals.cost) || 0,
+                      profit: Number.parseFloat(activeReport.totals.profit) || 0,
+                    },
+                  ]
+                : null)
+            }
+          />
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
@@ -647,16 +785,26 @@ function LegendDot({ color, label }: { color: string; label: string }) {
   );
 }
 
-function ProfitTrendChart() {
+function ProfitTrendChart({ data }: { data: TrendPoint[] | null }) {
   const width = 720;
   const height = 220;
   const padding = { top: 16, right: 16, bottom: 28, left: 56 };
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
 
-  const max = Math.max(...PROFIT_TREND.flatMap((d) => [d.revenue, d.cost, d.profit])) * 1.15;
+  const points = data ?? PROFIT_TREND;
+  if (points.length === 0) {
+    return (
+      <div className="flex h-[220px] items-center justify-center text-xs text-muted">
+        No data in the selected window.
+      </div>
+    );
+  }
+
+  const rawMax = Math.max(...points.flatMap((d) => [d.revenue, d.cost, d.profit, 0]));
+  const max = rawMax > 0 ? rawMax * 1.15 : 1;
   const min = 0;
-  const groupW = innerW / PROFIT_TREND.length;
+  const groupW = innerW / points.length;
   const barW = Math.min(36, groupW / 3);
 
   const yFor = (v: number) => padding.top + innerH - ((v - min) / (max - min)) * innerH;
@@ -667,7 +815,7 @@ function ProfitTrendChart() {
     return { y, value };
   });
 
-  const profitPoints = PROFIT_TREND.map((d, i) => {
+  const profitPoints = points.map((d, i) => {
     const cx = padding.left + groupW * i + groupW / 2;
     const cy = yFor(d.profit);
     return { cx, cy };
@@ -679,16 +827,16 @@ function ProfitTrendChart() {
         <g key={i}>
           <line x1={padding.left} x2={width - padding.right} y1={g.y} y2={g.y} stroke="#E5E7EB" strokeDasharray="3 3" />
           <text x={padding.left - 8} y={g.y + 3} fontSize="10" textAnchor="end" fill="#6B778C">
-            ${(g.value / 1000).toFixed(0)}k
+            {formatMoney(g.value)}
           </text>
         </g>
       ))}
 
-      {PROFIT_TREND.map((d, i) => {
+      {points.map((d, i) => {
         const groupX = padding.left + groupW * i;
         const center = groupX + groupW / 2;
         return (
-          <g key={d.label}>
+          <g key={`${d.label}-${i}`}>
             <rect
               x={center - barW - 2}
               y={yFor(d.revenue)}

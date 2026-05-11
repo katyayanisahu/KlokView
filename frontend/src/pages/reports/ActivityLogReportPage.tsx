@@ -76,10 +76,20 @@ export default function ActivityLogReportPage() {
 
   const weekStartsOn = useWeekStart();
   const fiscalStartMonth = useFiscalYearStartMonth();
-  const range = useMemo(
-    () => computeRange(period, anchor, weekStartsOn, fiscalStartMonth),
-    [period, anchor, weekStartsOn, fiscalStartMonth],
-  );
+  const todayIso = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+  const monthStartIso = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  }, []);
+  const [customStart, setCustomStart] = useState<string>(monthStartIso);
+  const [customEnd, setCustomEnd] = useState<string>(todayIso);
+  const range = useMemo(() => {
+    if (period === 'custom') return { start: customStart, end: customEnd };
+    return computeRange(period, anchor, weekStartsOn, fiscalStartMonth);
+  }, [period, anchor, weekStartsOn, fiscalStartMonth, customStart, customEnd]);
   const isAllTime = period === 'all_time';
 
   useEffect(() => {
@@ -282,6 +292,12 @@ export default function ActivityLogReportPage() {
             rangeLabel={rangeLabel}
             onPrev={handlePrev}
             onNext={handleNext}
+            customStart={customStart}
+            customEnd={customEnd}
+            onCustomChange={(s, e) => {
+              setCustomStart(s);
+              setCustomEnd(e);
+            }}
           />
           {subTab === 'approval' ? (
             <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
