@@ -7,6 +7,7 @@ export interface User {
   role: Role;
   hourly_rate: number;
   avatar_url?: string;
+  home_show_welcome?: boolean;
 }
 
 export interface ApiEnvelope<T> {
@@ -107,6 +108,63 @@ export interface TeamMemberDetail extends TeamMember {
   project_memberships: TeamMemberProjectMembership[];
   hourly_rate?: string;
   cost_rate?: string;
+}
+
+export interface MyProfileProjectMembership {
+  project_id: number;
+  project_name: string;
+  client_name: string;
+  is_project_manager: boolean;
+  is_active?: boolean;
+}
+
+export interface MyProfile {
+  id: number;
+  email: string;
+  full_name: string;
+  first_name: string;
+  last_name: string;
+  role: Role;
+  avatar_url: string;
+  employee_id: string;
+  weekly_capacity_hours: string;
+  timezone: string;
+  account_timezone: string;
+  home_show_welcome: boolean;
+  job_role_ids: number[];
+  job_role_names: string[];
+  notification_prefs: NotificationPrefs;
+  project_memberships: MyProfileProjectMembership[];
+}
+
+export interface MyProfileUpdatePayload {
+  first_name?: string;
+  last_name?: string;
+  employee_id?: string;
+  weekly_capacity_hours?: string | number;
+  timezone?: string;
+  avatar_url?: string;
+  home_show_welcome?: boolean;
+  job_role_ids?: number[];
+}
+
+export interface NotificationPrefs {
+  reminder_personal_daily: boolean;
+  reminder_team_wide: boolean;
+  weekly_email: boolean;
+  approval_email_people: boolean;
+  approval_email_projects: boolean;
+  approval_email_approved: boolean;
+  project_deleted_email: boolean;
+  product_updates_email: boolean;
+}
+
+export interface AssignedPerson {
+  id: number;
+  full_name: string;
+  email: string;
+  role: Role;
+  avatar_url: string;
 }
 
 export type InviteInvalidReason = 'expired' | 'not_found' | 'already_used';
@@ -252,6 +310,7 @@ export interface JobRole {
 
 export interface ProjectTaskEntry {
   id: number;
+  task_id: number;
   task_name: string;
   is_billable: boolean;
   hours_logged?: string;

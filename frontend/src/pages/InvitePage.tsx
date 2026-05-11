@@ -10,6 +10,7 @@ import {
   Shield,
   User as UserIcon,
   UserCheck,
+  UserPlus,
   Users as UsersIcon,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -23,6 +24,7 @@ import {
 import { listJobRoles } from '@/api/jobRoles';
 import { listProjects } from '@/api/projects';
 import { extractApiError } from '@/utils/errors';
+import { useDefaultCapacityHours } from '@/utils/preferences';
 import type {
   InviteCreateResponse,
   InviteRole,
@@ -66,6 +68,7 @@ const NAME_RE = /^[\p{L}][\p{L}\s'’\-]*$/u;
 
 export default function InvitePage() {
   const navigate = useNavigate();
+  const defaultCapacity = useDefaultCapacityHours();
   const [step, setStep] = useState<Step>(1);
 
   // step 1 state
@@ -73,7 +76,13 @@ export default function InvitePage() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [employeeId, setEmployeeId] = useState('');
-  const [capacity, setCapacity] = useState('35');
+  const [capacity, setCapacity] = useState(defaultCapacity);
+  const [capacityTouched, setCapacityTouched] = useState(false);
+
+  // Refresh default if the preference loads after the page renders
+  useEffect(() => {
+    if (!capacityTouched) setCapacity(defaultCapacity);
+  }, [defaultCapacity, capacityTouched]);
   const [selectedJobRoleIds, setSelectedJobRoleIds] = useState<number[]>([]);
   const [jobRoles, setJobRoles] = useState<JobRole[]>([]);
   const [rolesOpen, setRolesOpen] = useState(false);
@@ -219,7 +228,8 @@ export default function InvitePage() {
     setLastName('');
     setEmail('');
     setEmployeeId('');
-    setCapacity('35');
+    setCapacity(defaultCapacity);
+    setCapacityTouched(false);
     setSelectedJobRoleIds([]);
     setPermission('member');
     setAssignedIds(new Set());
@@ -278,7 +288,7 @@ export default function InvitePage() {
       case 1:
         return 'Invite a person';
       case 2:
-        return `What can ${created?.first_name || 'this person'} do in TrackFlow?`;
+        return `What can ${created?.first_name || 'this person'} do in KlokView?`;
       case 3:
         return `What projects is ${created?.first_name || 'this person'} working on?`;
       case 4:
@@ -316,24 +326,39 @@ export default function InvitePage() {
         ) : null}
 
         <div className="card">
-          <h1 className="font-heading text-2xl font-bold text-text">{stepTitle}</h1>
-          {step === 1 ? (
-            <p className="mt-1 text-sm text-muted">
-              We&apos;ll email this person an invitation to join your team in TrackFlow.
-            </p>
-          ) : null}
-          {step === 2 ? (
-            <p className="mt-1 text-sm text-muted">
-              Choose a permission based on what {created?.first_name || 'this person'} should be
-              able to see and do. You can always change this later.
-            </p>
-          ) : null}
-          {step === 3 ? (
-            <p className="mt-1 text-sm text-muted">
-              Add {created?.first_name || 'this person'} to projects so they can track time
-              against them.
-            </p>
-          ) : null}
+          <div className="flex items-start gap-3">
+            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+              {step === 1 ? (
+                <UserPlus className="h-5 w-5" />
+              ) : step === 2 ? (
+                <Shield className="h-5 w-5" />
+              ) : step === 3 ? (
+                <Briefcase className="h-5 w-5" />
+              ) : (
+                <Check className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="font-heading text-2xl font-bold text-text">{stepTitle}</h1>
+              {step === 1 ? (
+                <p className="mt-1 text-sm text-muted">
+                  We&apos;ll email this person an invitation to join your team in KlokView.
+                </p>
+              ) : null}
+              {step === 2 ? (
+                <p className="mt-1 text-sm text-muted">
+                  Choose a permission based on what {created?.first_name || 'this person'} should be
+                  able to see and do. You can always change this later.
+                </p>
+              ) : null}
+              {step === 3 ? (
+                <p className="mt-1 text-sm text-muted">
+                  Add {created?.first_name || 'this person'} to projects so they can track time
+                  against them.
+                </p>
+              ) : null}
+            </div>
+          </div>
 
           {serverError ? (
             <div className="mt-4 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -352,7 +377,10 @@ export default function InvitePage() {
               employeeId={employeeId}
               setEmployeeId={setEmployeeId}
               capacity={capacity}
-              setCapacity={setCapacity}
+              setCapacity={(v) => {
+                setCapacityTouched(true);
+                setCapacity(v);
+              }}
               jobRoles={jobRoles}
               selectedJobRoleIds={selectedJobRoleIds}
               setSelectedJobRoleIds={setSelectedJobRoleIds}
@@ -433,7 +461,7 @@ function StepIndicator({ step }: { step: Step }) {
             </span>
             <span
               className={`text-xs font-semibold transition ${
-                active ? 'text-text' : done ? 'text-muted' : 'text-muted/60'
+                active ? 'inline text-text' : `hidden sm:inline ${done ? 'text-muted' : 'text-muted/60'}`
               }`}
             >
               {label}
@@ -557,16 +585,6 @@ function Step1Form({
       </div>
 
       <div>
-        <span className="label">Type</span>
-        <div className="mt-1 inline-flex w-full rounded-lg border border-primary/30 bg-primary-soft/40 p-0.5">
-          <span className="flex flex-1 items-center justify-center gap-2 rounded-md bg-white px-4 py-2 text-sm font-semibold text-primary shadow-sm">
-            <Briefcase className="h-4 w-4" />
-            Employee
-          </span>
-        </div>
-      </div>
-
-      <div>
         <label className="label">
           Roles <span className="font-normal text-muted">(optional)</span>
         </label>
@@ -646,7 +664,7 @@ function Step1Form({
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2 pt-2">
+      <div className="-mx-6 -mb-6 mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-4">
         <button type="submit" disabled={submitting} className="btn-primary">
           {submitting ? 'Sending invite…' : 'Invite and continue'}
         </button>

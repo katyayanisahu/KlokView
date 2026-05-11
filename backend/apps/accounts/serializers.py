@@ -11,7 +11,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import JobRole
+from .models import Account, JobRole
 
 User = get_user_model()
 
@@ -31,7 +31,10 @@ def _user_hours_this_week(user, *, billable_only: bool = False) -> Decimal:
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'email', 'full_name', 'role', 'avatar_url', 'hourly_rate')
+        fields = (
+            'id', 'email', 'full_name', 'role', 'avatar_url', 'hourly_rate',
+            'home_show_welcome',
+        )
         read_only_fields = ('id', 'role')
 
 
@@ -270,6 +273,88 @@ class TeamMemberDetailSerializer(TeamMemberSerializer):
         ]
 
 
+class MeProfileSerializer(serializers.ModelSerializer):
+    """Read serializer for the logged-in user's full profile (used by /auth/me/profile/)."""
+
+    project_memberships = serializers.SerializerMethodField()
+    job_role_names = serializers.SerializerMethodField()
+    job_role_ids = serializers.PrimaryKeyRelatedField(
+        source='job_roles', many=True, read_only=True,
+    )
+    notification_prefs = serializers.SerializerMethodField()
+    account_timezone = serializers.CharField(source='account.timezone', read_only=True)
+
+    class Meta:
+        model = User
+        fields = (
+            'id', 'email', 'full_name', 'first_name', 'last_name', 'role',
+            'avatar_url', 'employee_id', 'weekly_capacity_hours',
+            'timezone', 'account_timezone', 'home_show_welcome',
+            'job_role_ids', 'job_role_names',
+            'notification_prefs', 'project_memberships',
+        )
+        read_only_fields = fields
+
+    def get_project_memberships(self, obj):
+        return [
+            {
+                'project_id': m.project_id,
+                'project_name': m.project.name,
+                'client_name': m.project.client.name,
+                'is_project_manager': m.is_project_manager,
+            }
+            for m in obj.project_memberships.select_related('project__client').all()
+        ]
+
+    def get_job_role_names(self, obj):
+        return list(obj.job_roles.values_list('name', flat=True))
+
+    def get_notification_prefs(self, obj):
+        from .models import merged_notification_prefs
+        return merged_notification_prefs(obj)
+
+
+class MeProfileUpdateSerializer(serializers.Serializer):
+    """Patch serializer for the logged-in user's editable profile fields."""
+
+    first_name = serializers.CharField(max_length=75, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=75, required=False, allow_blank=True)
+    employee_id = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    weekly_capacity_hours = serializers.DecimalField(
+        max_digits=5, decimal_places=2, required=False, min_value=Decimal('0'),
+    )
+    timezone = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    avatar_url = serializers.URLField(required=False, allow_blank=True)
+    home_show_welcome = serializers.BooleanField(required=False)
+    job_role_ids = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=JobRole.objects.all(), required=False,
+    )
+
+    def validate_job_role_ids(self, value):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            account_id = request.user.account_id
+            for jr in value:
+                if jr.account_id != account_id:
+                    raise serializers.ValidationError(
+                        'Cannot assign a job role from a different account.'
+                    )
+        return value
+
+
+class MeNotificationsSerializer(serializers.Serializer):
+    """All notification toggles. All fields optional on PATCH."""
+
+    reminder_personal_daily = serializers.BooleanField(required=False)
+    reminder_team_wide = serializers.BooleanField(required=False)
+    weekly_email = serializers.BooleanField(required=False)
+    approval_email_people = serializers.BooleanField(required=False)
+    approval_email_projects = serializers.BooleanField(required=False)
+    approval_email_approved = serializers.BooleanField(required=False)
+    project_deleted_email = serializers.BooleanField(required=False)
+    product_updates_email = serializers.BooleanField(required=False)
+
+
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
@@ -297,6 +382,80 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         user.set_password(self.validated_data['new_password'])
         user.save(update_fields=['password', 'updated_at'])
         return user
+
+
+class AccountSettingsSerializer(serializers.ModelSerializer):
+    """Workspace-level settings: Preferences, Modules, Sign-in security."""
+
+    owner = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(), required=False, allow_null=True,
+    )
+    owner_name = serializers.CharField(source='owner.full_name', read_only=True)
+    owner_email = serializers.CharField(source='owner.email', read_only=True)
+    eligible_owners = serializers.SerializerMethodField()
+    has_sample_data = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Account
+        fields = (
+            'id', 'name',
+            'owner', 'owner_name', 'owner_email', 'eligible_owners',
+            'has_sample_data',
+            # Preferences
+            'timezone', 'fiscal_year_start_month', 'week_starts_on',
+            'default_capacity_hours', 'timesheet_deadline',
+            'date_format', 'time_format', 'time_display', 'timer_mode',
+            'currency', 'number_format',
+            # Modules
+            'enabled_modules',
+            # Sign-in security
+            'require_two_factor', 'allow_google_sso', 'allow_microsoft_sso',
+            'session_timeout_minutes', 'login_alerts',
+            'updated_at',
+        )
+        read_only_fields = (
+            'id', 'owner_name', 'owner_email', 'eligible_owners',
+            'has_sample_data', 'updated_at',
+        )
+
+    def get_has_sample_data(self, obj) -> bool:
+        from apps.clients.models import Client
+        return Client.objects.filter(account_id=obj.id, name__startswith='[SAMPLE]').exists()
+
+    def get_eligible_owners(self, obj) -> list[dict]:
+        """Active owner/admin users in this workspace who can be the Account Owner."""
+        qs = (
+            User.objects.filter(
+                account_id=obj.id,
+                is_active=True,
+                role__in=[User.Role.OWNER, User.Role.ADMIN],
+            )
+            .order_by('full_name', 'email')
+        )
+        return [
+            {
+                'id': u.id,
+                'full_name': u.full_name or u.email,
+                'email': u.email,
+                'role': u.role,
+            }
+            for u in qs
+        ]
+
+    def validate_owner(self, value):
+        if value is None:
+            raise serializers.ValidationError('Account owner is required.')
+        if value.account_id != self.instance.id:
+            raise serializers.ValidationError(
+                'New owner must belong to this workspace.',
+            )
+        if value.role not in (User.Role.OWNER, User.Role.ADMIN):
+            raise serializers.ValidationError(
+                'Only employees with Administrator or Owner permissions can become the Account Owner.',
+            )
+        if not value.is_active:
+            raise serializers.ValidationError('Cannot assign an archived user as the Account Owner.')
+        return value
 
 
 def tokens_for_user(user) -> dict:

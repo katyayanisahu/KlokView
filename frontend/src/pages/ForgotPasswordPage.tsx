@@ -65,7 +65,7 @@ export default function ForgotPasswordPage() {
     <div className="flex min-h-full items-center justify-center bg-gradient-to-b from-bg to-primary-soft/30 px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <span className="brand-mark">trackflow</span>
+          <span className="brand-mark">klokview</span>
           <h1 className="mt-6 font-heading text-2xl font-semibold text-text">
             {submittedEmail ? 'Check your email' : 'Reset your password'}
           </h1>

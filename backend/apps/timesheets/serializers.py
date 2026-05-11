@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from apps.projects.models import Project, ProjectTask
 
-from .models import Submission, TimeEntry
+from .models import ImportBatch, Submission, TimeEntry
 
 
 def parse_hours_input(value) -> Decimal:
@@ -172,3 +172,23 @@ class SubmissionCreateSerializer(serializers.Serializer):
 
 class SubmissionDecisionSerializer(serializers.Serializer):
     decision_note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class ImportBatchSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(source='created_by.full_name', read_only=True)
+    created_by_email = serializers.CharField(source='created_by.email', read_only=True)
+    surviving_record_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ImportBatch
+        fields = (
+            'id', 'kind', 'record_count', 'surviving_record_count',
+            'source_filename', 'note',
+            'created_by', 'created_by_name', 'created_by_email',
+            'created_at',
+        )
+        read_only_fields = fields
+
+    def get_surviving_record_count(self, obj) -> int:
+        # How many of the original imported rows still exist (none are deleted via revert)
+        return obj.time_entries.count()

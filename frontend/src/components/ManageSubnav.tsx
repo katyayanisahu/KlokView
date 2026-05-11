@@ -17,13 +17,13 @@ const manageSections: ManageSection[] = [
 export default function ManageSubnav() {
   return (
     <div className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-6xl items-center gap-1 px-6">
+      <div className="mx-auto flex max-w-6xl items-center gap-1 overflow-x-auto px-4 sm:px-6">
         {manageSections.map(({ label, to, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) =>
-              `relative inline-flex items-center gap-2 rounded-t-md px-4 py-4 text-sm font-semibold transition ${
+              `relative inline-flex shrink-0 items-center gap-2 rounded-t-md px-3 py-3.5 text-sm font-semibold transition sm:px-4 sm:py-4 ${
                 isActive
                   ? 'text-primary'
                   : 'text-muted hover:bg-slate-50 hover:text-text'

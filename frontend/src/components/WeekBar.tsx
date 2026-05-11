@@ -1,6 +1,7 @@
 import { Lock } from 'lucide-react';
 
 import type { WeekDay } from '@/mock/dashboardData';
+import { formatHoursDisplay, useTimeDisplay } from '@/utils/preferences';
 
 interface WeekBarProps {
   days: WeekDay[];
@@ -8,13 +9,6 @@ interface WeekBarProps {
   onSelectDay: (date: Date) => void;
   /** Predicate: is this date locked by an active submission? */
   isDateLocked?: (date: Date) => boolean;
-}
-
-function formatHours(hours: number): string {
-  if (!hours) return '0:00';
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
-  return `${h}:${m.toString().padStart(2, '0')}`;
 }
 
 function sameDay(a: Date, b: Date): boolean {
@@ -26,6 +20,9 @@ function sameDay(a: Date, b: Date): boolean {
 }
 
 export default function WeekBar({ days, activeDate, onSelectDay, isDateLocked }: WeekBarProps) {
+  const timeDisplay = useTimeDisplay();
+  const formatHours = (h: number) => formatHoursDisplay(h, timeDisplay);
+
   const total = days.reduce((sum, d) => sum + d.hours, 0);
 
   return (

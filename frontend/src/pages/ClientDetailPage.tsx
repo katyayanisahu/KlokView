@@ -129,7 +129,7 @@ export default function ClientDetailPage() {
             ) : null}
             {canEdit ? (
               <Link to={`/projects/new?client=${client.id}`} className="btn-primary">
-                <Plus className="mr-1 h-4 w-4" />
+                <Plus className="h-4 w-4" />
                 New project
               </Link>
             ) : null}

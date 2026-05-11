@@ -68,14 +68,14 @@ export default function LandingPage() {
       {/* Top nav */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
-          <Link to="/" className="flex select-none items-center gap-2.5" aria-label="TrackFlow home">
+          <Link to="/" className="flex select-none items-center gap-2.5" aria-label="KlokView home">
             <img src="/logo.svg" alt="" className="h-8 w-auto" />
-            <span className="font-heading text-xl font-bold text-primary">TrackFlow</span>
+            <span className="font-heading text-xl font-bold text-primary">KlokView</span>
           </Link>
           <nav className="hidden items-center gap-7 text-sm font-medium text-text/80 sm:flex">
             <a href="#features" className="transition hover:text-primary">Features</a>
             <a href="#how" className="transition hover:text-primary">How it works</a>
-            <a href="#stack" className="transition hover:text-primary">Why TrackFlow</a>
+            <a href="#stack" className="transition hover:text-primary">Why KlokView</a>
           </nav>
           <div className="flex items-center gap-2">
             <Link
@@ -108,7 +108,7 @@ export default function LandingPage() {
               <span className="text-primary">actually wants</span> to use.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-text/75 sm:text-lg">
-              TrackFlow gives you Harvest-style time entry, project budgets, weekly approvals,
+              KlokView gives you Harvest-style time entry, project budgets, weekly approvals,
               and Outlook calendar sync — in one focused, opinionated workspace.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -265,11 +265,11 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Why TrackFlow */}
+      {/* Why KlokView */}
       <section id="stack" className="border-t border-slate-200 bg-white py-16 sm:py-20">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 sm:px-6 lg:grid-cols-[1fr_1fr] lg:gap-16 lg:px-8">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-primary">Why TrackFlow</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-primary">Why KlokView</p>
             <h2 className="mt-2 font-heading text-3xl font-bold text-text sm:text-4xl">
               Opinionated where it matters. Out of the way everywhere else.
             </h2>

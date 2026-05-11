@@ -20,6 +20,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .permissions import IsOwnerOrAdmin, IsOwnerOrAdminForWrite
 from .tenant import TenantScopedMixin
 from .serializers import (
+    AccountSettingsSerializer,
     InviteAcceptSerializer,
     InviteAssignProjectsSerializer,
     InviteCreateSerializer,
@@ -27,6 +28,9 @@ from .serializers import (
     InviteUserSerializer,
     JobRoleSerializer,
     LoginSerializer,
+    MeNotificationsSerializer,
+    MeProfileSerializer,
+    MeProfileUpdateSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     RegisterSerializer,
@@ -82,6 +86,83 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         return envelope(data=serializer.validated_data)
+
+
+class MicrosoftSSOStartView(APIView):
+    """Redirect the user to Microsoft's authorize endpoint to begin SSO."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from django.shortcuts import redirect
+        from . import microsoft_sso
+
+        if not microsoft_sso.is_configured():
+            return _sso_error_redirect('not_configured')
+        return_path = request.query_params.get('return_to', '/dashboard') or '/dashboard'
+        state = microsoft_sso.make_state(return_path=return_path)
+        return redirect(microsoft_sso.build_authorize_url(state))
+
+
+class MicrosoftSSOCallbackView(APIView):
+    """Handle the Azure AD redirect: exchange code, find user, issue JWT, bounce to frontend."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from . import microsoft_sso
+
+        ms_error = request.query_params.get('error')
+        if ms_error:
+            return _sso_error_redirect(ms_error)
+
+        code = request.query_params.get('code')
+        state = request.query_params.get('state')
+        if not code or not state:
+            return _sso_error_redirect('missing_params')
+
+        try:
+            return_path = microsoft_sso.verify_state(state)
+        except ValueError:
+            return _sso_error_redirect('invalid_state')
+
+        try:
+            tokens = microsoft_sso.exchange_code_for_tokens(code)
+            ms_access_token = tokens.get('access_token', '')
+            email = microsoft_sso.fetch_user_email(ms_access_token)
+        except Exception:
+            return _sso_error_redirect('exchange_failed')
+
+        if not email:
+            return _sso_error_redirect('no_email')
+
+        user = (
+            User.objects.filter(email__iexact=email)
+            .select_related('account')
+            .order_by('-is_active', '-id')
+            .first()
+        )
+        if user is None:
+            return _sso_error_redirect('not_invited')
+        if not user.is_active:
+            return _sso_error_redirect('archived')
+        if not user.account or not user.account.allow_microsoft_sso:
+            return _sso_error_redirect('workspace_disabled')
+
+        jwt_tokens = tokens_for_user(user)
+        frontend = settings.FRONTEND_URL.rstrip('/')
+        # Tokens delivered via URL fragment so they don't hit server logs.
+        fragment = (
+            f"access={jwt_tokens['access']}"
+            f"&refresh={jwt_tokens['refresh']}"
+            f"&return_to={return_path}"
+        )
+        from django.shortcuts import redirect
+        return redirect(f'{frontend}/auth/microsoft/callback#{fragment}')
+
+
+def _sso_error_redirect(reason: str):
+    from django.shortcuts import redirect
+    frontend = settings.FRONTEND_URL.rstrip('/')
+    return redirect(f'{frontend}/login?sso_error={reason}')
 
 
 class RefreshView(TokenRefreshView):
@@ -471,6 +552,142 @@ class MeView(APIView):
         return envelope(data=serializer.data)
 
 
+class MeProfileView(APIView):
+    """Full profile for the logged-in user. Used by /profile pages."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return envelope(data=MeProfileSerializer(request.user).data)
+
+    def patch(self, request):
+        serializer = MeProfileUpdateSerializer(
+            data=request.data, partial=True, context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = request.user
+        update_fields = []
+        for field in (
+            'first_name', 'last_name', 'employee_id',
+            'weekly_capacity_hours', 'timezone', 'avatar_url', 'home_show_welcome',
+        ):
+            if field in data:
+                setattr(user, field, data[field])
+                update_fields.append(field)
+
+        if 'first_name' in data or 'last_name' in data:
+            full = f"{user.first_name} {user.last_name}".strip()
+            if full:
+                user.full_name = full
+                update_fields.append('full_name')
+
+        if update_fields:
+            update_fields.append('updated_at')
+            user.save(update_fields=update_fields)
+
+        if 'job_role_ids' in data:
+            user.job_roles.set(data['job_role_ids'])
+
+        return envelope(data=MeProfileSerializer(user).data)
+
+
+class MeNotificationsView(APIView):
+    """Get / update the logged-in user's notification preferences."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import merged_notification_prefs
+        return envelope(data=merged_notification_prefs(request.user))
+
+    def patch(self, request):
+        from .models import merged_notification_prefs
+        serializer = MeNotificationsSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        prefs = dict(request.user.notification_prefs or {})
+        for key, value in serializer.validated_data.items():
+            prefs[key] = value
+        request.user.notification_prefs = prefs
+        request.user.save(update_fields=['notification_prefs', 'updated_at'])
+        return envelope(data=merged_notification_prefs(request.user))
+
+
+class MeAssignedPeopleView(APIView):
+    """List the people the current user manages.
+
+    - Owner / Admin → all active users in the workspace (everyone they can see).
+    - Manager → users on projects they manage (`is_project_manager=True`), excluding self.
+    - Member → empty list (the page is hidden from the UI for Member anyway).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.projects.models import ProjectMembership
+
+        user = request.user
+        account_id = user.account_id
+
+        if user.role in (User.Role.OWNER, User.Role.ADMIN):
+            qs = User.objects.filter(account_id=account_id, is_active=True).exclude(pk=user.pk)
+        elif user.role == User.Role.MANAGER:
+            managed_project_ids = ProjectMembership.objects.filter(
+                user=user, is_project_manager=True,
+                project__account_id=account_id,
+            ).values_list('project_id', flat=True)
+            qs = (
+                User.objects.filter(
+                    account_id=account_id, is_active=True,
+                    project_memberships__project_id__in=list(managed_project_ids),
+                )
+                .exclude(pk=user.pk)
+                .distinct()
+            )
+        else:
+            qs = User.objects.none()
+
+        qs = qs.order_by('full_name', 'email')
+        data = [
+            {
+                'id': u.id,
+                'full_name': u.full_name or u.email,
+                'email': u.email,
+                'role': u.role,
+                'avatar_url': u.avatar_url,
+            }
+            for u in qs
+        ]
+        return envelope(data=data)
+
+
+class MeAssignedProjectsView(APIView):
+    """List the projects the logged-in user is a member of."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        memberships = (
+            request.user.project_memberships
+            .select_related('project__client')
+            .filter(project__account_id=request.user.account_id)
+            .order_by('project__name')
+        )
+        data = [
+            {
+                'project_id': m.project_id,
+                'project_name': m.project.name,
+                'client_name': m.project.client.name if m.project.client else '',
+                'is_project_manager': m.is_project_manager,
+                'is_active': m.project.is_active,
+            }
+            for m in memberships
+        ]
+        return envelope(data=data)
+
+
 class UserListView(APIView):
     """List users in the current account.
 
@@ -498,6 +715,170 @@ class UserListView(APIView):
         if detail == 'team':
             return Response(TeamMemberSerializer(qs, many=True).data)
         return Response(UserSerializer(qs, many=True).data)
+
+
+class AccountSettingsView(APIView):
+    """GET/PATCH the current workspace's settings (Preferences, Modules, Sign-in security).
+
+    Owner/Admin only for writes; everyone authenticated can read.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        account = Account.objects.filter(id=request.user.account_id).first()
+        if not account:
+            return envelope(error='Workspace not found', success=False, status_code=404)
+        return envelope(data=AccountSettingsSerializer(account).data)
+
+    def patch(self, request):
+        if request.user.role not in ('owner', 'admin'):
+            return envelope(
+                error='Only owners and admins can update workspace settings.',
+                success=False, status_code=status.HTTP_403_FORBIDDEN,
+            )
+        account = Account.objects.filter(id=request.user.account_id).first()
+        if not account:
+            return envelope(error='Workspace not found', success=False, status_code=404)
+        serializer = AccountSettingsSerializer(account, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return envelope(data=serializer.data)
+
+
+SAMPLE_CLIENTS = [
+    ('[SAMPLE] Client A', ''),
+    ('[SAMPLE] Client B', ''),
+]
+
+SAMPLE_PROJECTS = [
+    # (client_name, project_name, project_type, budget_type, budget_amount)
+    ('[SAMPLE] Client A', '[SAMPLE] Fixed Fee Project', 'fixed_fee', 'total_fees', 18340),
+    ('[SAMPLE] Client A', '[SAMPLE] Time & Materials Project', 'time_materials', 'total_hours', 156),
+    ('[SAMPLE] Client B', '[SAMPLE] Monthly Retainer', 'time_materials', 'total_fees', 6020),
+    ('[SAMPLE] Client B', '[SAMPLE] Non-Billable Project', 'non_billable', 'total_hours', 170),
+]
+
+# Tasks linked into each sample project so members can immediately log time.
+SAMPLE_PROJECT_TASKS = ['Design', 'Marketing', 'Programming', 'Project Management']
+
+
+class AddSampleDataView(APIView):
+    """Seed the workspace with `[SAMPLE]` clients + projects (idempotent).
+
+    Mirrors the original `0002_seed_demo_data` migration, but scoped to the
+    requesting user's account. Owner/Admin only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from apps.clients.models import Client
+        from apps.projects.models import Project, ProjectTask, Task
+
+        if request.user.role not in ('owner', 'admin'):
+            return envelope(
+                error='Only owners and admins can add sample data.',
+                success=False, status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        account_id = request.user.account_id
+
+        # Idempotency: if a sample client already exists, refuse — caller probably
+        # didn't refresh their state. Frontend will re-fetch.
+        if Client.objects.filter(account_id=account_id, name__startswith='[SAMPLE]').exists():
+            return envelope(
+                error='Sample data already exists in this workspace.',
+                success=False, status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Make sure the standard tasks exist before linking them.
+        task_objs = {}
+        for task_name in SAMPLE_PROJECT_TASKS:
+            task, _ = Task.objects.get_or_create(
+                account_id=account_id,
+                name=task_name,
+                defaults={'is_default': True, 'default_is_billable': True, 'is_active': True},
+            )
+            task_objs[task_name] = task
+
+        # Clients
+        client_objs = {}
+        for name, address in SAMPLE_CLIENTS:
+            client_objs[name] = Client.objects.create(
+                account_id=account_id, name=name, address=address,
+            )
+
+        # Projects + project_tasks
+        projects_created = 0
+        for client_name, project_name, project_type, budget_type, budget_amount in SAMPLE_PROJECTS:
+            project = Project.objects.create(
+                account_id=account_id,
+                client=client_objs[client_name],
+                name=project_name,
+                project_type=project_type,
+                budget_type=budget_type,
+                budget_amount=budget_amount,
+            )
+            for task_name in SAMPLE_PROJECT_TASKS:
+                ProjectTask.objects.create(
+                    project=project,
+                    task=task_objs[task_name],
+                    is_billable=True,
+                )
+            projects_created += 1
+
+        return envelope(data={
+            'clients_added': len(client_objs),
+            'projects_added': projects_created,
+            'tasks_linked_per_project': len(SAMPLE_PROJECT_TASKS),
+        })
+
+
+class RemoveSampleDataView(APIView):
+    """Delete all `[SAMPLE]`-prefixed clients and projects in this workspace.
+
+    TimeEntry, ProjectTask, and ProjectMembership rows cascade automatically.
+    Owner/Admin only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from apps.clients.models import Client
+        from apps.projects.models import Project
+
+        if request.user.role not in ('owner', 'admin'):
+            return envelope(
+                error='Only owners and admins can remove sample data.',
+                success=False, status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        account_id = request.user.account_id
+
+        # Projects whose own name starts with [SAMPLE] OR whose client is a sample client.
+        sample_projects = Project.objects.filter(
+            account_id=account_id,
+        ).filter(
+            models.Q(name__startswith='[SAMPLE]') | models.Q(client__name__startswith='[SAMPLE]'),
+        )
+        # Count time entries that will cascade-delete, for the response.
+        from apps.timesheets.models import TimeEntry
+        time_entries_count = TimeEntry.objects.filter(
+            account_id=account_id, project__in=sample_projects,
+        ).count()
+        projects_count = sample_projects.count()
+        sample_projects.delete()
+
+        # Sample clients (no projects left protecting them now).
+        sample_clients = Client.objects.filter(
+            account_id=account_id, name__startswith='[SAMPLE]',
+        )
+        clients_count = sample_clients.count()
+        sample_clients.delete()
+
+        return envelope(data={
+            'clients_removed': clients_count,
+            'projects_removed': projects_count,
+            'time_entries_removed': time_entries_count,
+        })
 
 
 class JobRoleViewSet(TenantScopedMixin, viewsets.ModelViewSet):

@@ -26,6 +26,8 @@ import {
 } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 import { extractApiError } from '@/utils/errors';
+import { startOfWeek as startOfWeekPref, useWeekStart } from '@/utils/preferences';
+import type { WeekStart } from '@/api/accountSettings';
 import type { Role, TeamMember } from '@/types';
 
 type RoleFilter =
@@ -67,13 +69,8 @@ const FILTER_SECTIONS: FilterSection[] = [
   { label: 'Role', options: ['owner', 'admin', 'manager', 'member'] },
 ];
 
-function startOfWeek(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  const day = x.getDay();
-  const diff = (day + 6) % 7;
-  x.setDate(x.getDate() - diff);
-  return x;
+function startOfWeek(d: Date, weekStartsOn: WeekStart = 'monday'): Date {
+  return startOfWeekPref(d, weekStartsOn);
 }
 
 function formatWeekRange(start: Date): string {
@@ -88,8 +85,8 @@ function formatWeekRange(start: Date): string {
   return `${startStr} – ${endStr}, ${year}`;
 }
 
-function isCurrentWeek(start: Date): boolean {
-  const today = startOfWeek(new Date());
+function isCurrentWeek(start: Date, weekStartsOn: WeekStart): boolean {
+  const today = startOfWeek(new Date(), weekStartsOn);
   return start.getTime() === today.getTime();
 }
 
@@ -108,7 +105,13 @@ export default function TeamPage() {
   const [resendNotice, setResendNotice] = useState<string | null>(null);
   const [openActionsId, setOpenActionsId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()));
+  const weekStartsOn = useWeekStart();
+  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date(), weekStartsOn));
+
+  // Re-anchor when the workspace preference changes
+  useEffect(() => {
+    setWeekStart(startOfWeek(new Date(), weekStartsOn));
+  }, [weekStartsOn]);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,7 +268,7 @@ export default function TeamPage() {
     setWeekStart(next);
   };
 
-  const goCurrentWeek = () => setWeekStart(startOfWeek(new Date()));
+  const goCurrentWeek = () => setWeekStart(startOfWeek(new Date(), weekStartsOn));
 
   return (
     <div className="min-h-screen bg-bg">
@@ -304,11 +307,11 @@ export default function TeamPage() {
             </button>
             <div className="ml-2 flex items-baseline gap-2">
               <h2 className="font-heading text-lg font-bold text-text">
-                {isCurrentWeek(weekStart) ? 'This week' : 'Week of'}
+                {isCurrentWeek(weekStart, weekStartsOn) ? 'This week' : 'Week of'}
               </h2>
               <span className="text-sm text-muted">{formatWeekRange(weekStart)}</span>
             </div>
-            {!isCurrentWeek(weekStart) ? (
+            {!isCurrentWeek(weekStart, weekStartsOn) ? (
               <button
                 type="button"
                 onClick={goCurrentWeek}
@@ -328,7 +331,7 @@ export default function TeamPage() {
         </div>
 
         {/* Summary strip */}
-        <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <SummaryCard label="Total hours" value={totals.tracked.toFixed(2)} accent="primary" />
           <SummaryCard
             label="Team capacity"
@@ -346,7 +349,7 @@ export default function TeamPage() {
         {/* Toolbar */}
         <div className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-            <div className="relative flex-1 min-w-[260px]">
+            <div className="relative w-full flex-1 sm:min-w-[260px]">
               <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
               <input
                 value={search}
@@ -379,20 +382,20 @@ export default function TeamPage() {
           <EmptyState filter={roleFilter} hasSearch={search.length > 0} />
         ) : (
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="hidden grid-cols-[1fr_120px_120px_120px_120px_56px] items-center gap-3 border-b border-slate-200 bg-slate-50/60 px-5 py-2.5 lg:grid">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+            <div className="hidden grid-cols-[1fr_120px_120px_120px_120px_56px] items-center gap-3 border-b-2 border-slate-200 px-5 py-3 lg:grid">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                 Employee
               </p>
-              <p className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted">
+              <p className="text-right text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                 Hours
               </p>
-              <p className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted">
+              <p className="text-right text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                 Utilization
               </p>
-              <p className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted">
+              <p className="text-right text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                 Capacity
               </p>
-              <p className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted">
+              <p className="text-right text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                 Billable
               </p>
               <span aria-hidden />
@@ -452,7 +455,7 @@ function RoleFilterDropdown({
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <div className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+          <div className="absolute left-0 z-20 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg sm:left-auto sm:right-0">
             {FILTER_SECTIONS.map((section, sIdx) => (
               <div
                 key={section.label ?? `section-${sIdx}`}
@@ -676,7 +679,10 @@ function MemberRow({
         </div>
       ) : (
         <>
-          <div className="text-right">
+          <div className="flex items-baseline justify-between gap-2 lg:block lg:text-right">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted lg:hidden">
+              Hours
+            </span>
             <p className="font-heading text-sm font-bold text-text">{tracked.toFixed(2)}</p>
             <div className="mt-1 hidden h-1.5 w-full overflow-hidden rounded-full bg-slate-100 lg:block">
               <div
@@ -685,9 +691,24 @@ function MemberRow({
               />
             </div>
           </div>
-          <p className="text-right text-sm font-semibold text-text">{utilization}%</p>
-          <p className="text-right text-sm text-text">{capacity.toFixed(2)}</p>
-          <p className="text-right text-sm text-text">{billable.toFixed(2)}</p>
+          <p className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text lg:block lg:text-right">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted lg:hidden">
+              Utilization
+            </span>
+            <span>{utilization}%</span>
+          </p>
+          <p className="flex items-baseline justify-between gap-2 text-sm text-text lg:block lg:text-right">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted lg:hidden">
+              Capacity
+            </span>
+            <span>{capacity.toFixed(2)} hr</span>
+          </p>
+          <p className="flex items-baseline justify-between gap-2 text-sm text-text lg:block lg:text-right">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted lg:hidden">
+              Billable
+            </span>
+            <span>{billable.toFixed(2)}</span>
+          </p>
         </>
       )}
 

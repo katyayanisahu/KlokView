@@ -192,7 +192,7 @@ export default function ManageClientsPage() {
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => setNewClientOpen(true)} className="btn-primary">
-              <Plus className="mr-1 h-4 w-4" />
+              <Plus className="h-4 w-4" />
               New client
             </button>
             <button
@@ -207,7 +207,7 @@ export default function ManageClientsPage() {
               className="btn-outline"
               title="Add contact (uses first client; pick a client row for a specific one)"
             >
-              <UserPlus className="mr-1 h-4 w-4" />
+              <UserPlus className="h-4 w-4" />
               Add contact
             </button>
             <div className="relative" ref={importExportRef}>
@@ -217,7 +217,7 @@ export default function ManageClientsPage() {
                 className="btn-outline"
               >
                 Import/Export
-                <ChevronDown className="ml-1 h-4 w-4" />
+                <ChevronDown className="ml-1 h-4 w-4 text-muted" />
               </button>
               {importExportOpen ? (
                 <div className="absolute left-0 z-10 mt-1 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
@@ -245,8 +245,8 @@ export default function ManageClientsPage() {
             </div>
           </div>
 
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <div className="relative w-full sm:w-72">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+            <div className="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
               <input
                 value={search}
@@ -258,7 +258,7 @@ export default function ManageClientsPage() {
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value as StatusFilter)}
-              className="input"
+              className="input w-auto shrink-0"
             >
               <option value="active">Active</option>
               <option value="archived">Archived</option>
@@ -281,17 +281,23 @@ export default function ManageClientsPage() {
             </p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md">
-            {filtered.map((c, idx) => (
+          <div className="space-y-3">
+            {filtered.map((c) => (
               <div
                 key={c.id}
-                className={`${idx === 0 ? '' : 'border-t border-slate-200'}`}
+                className={`overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-primary/30 hover:shadow-md ${
+                  c.is_active ? '' : 'opacity-80'
+                }`}
               >
-                <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-3">
+                <div
+                  className={`flex flex-wrap items-center justify-between gap-3 border-l-[5px] px-5 py-4 ${
+                    c.is_active ? 'border-primary' : 'border-slate-300'
+                  }`}
+                >
                   <div className="flex items-center gap-3">
                     <Link
                       to={`/manage/clients/${c.id}/edit`}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-text shadow-sm transition hover:bg-slate-50"
+                      className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary-soft px-3 py-1 text-xs font-semibold text-primary shadow-sm transition hover:bg-primary-soft/70"
                     >
                       <Pencil className="h-3 w-3" />
                       Edit
@@ -329,7 +335,7 @@ export default function ManageClientsPage() {
                       onClick={() =>
                         setContactModal({ client: { id: c.id, name: c.name }, contact: null })
                       }
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-text shadow-sm transition hover:bg-slate-50"
+                      className="inline-flex items-center gap-1 rounded-md border border-accent-dark/30 bg-accent-soft px-3 py-1 text-xs font-semibold text-accent-dark shadow-sm transition hover:bg-accent-soft/70"
                     >
                       <Plus className="h-3 w-3" />
                       Add contact
@@ -348,13 +354,15 @@ export default function ManageClientsPage() {
                 </div>
 
                 {c.contacts.length > 0 ? (
-                  <div>
-                    {c.contacts.map((k) => {
+                  <div className="bg-white">
+                    {c.contacts.map((k, kIdx) => {
                       const fullName = `${k.first_name} ${k.last_name}`.trim();
                       return (
                         <div
                           key={k.id}
-                          className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-2.5 pl-12"
+                          className={`flex flex-wrap items-center justify-between gap-3 border-l-4 border-transparent px-5 py-3 pl-14 transition hover:bg-bg/60 ${
+                            kIdx === 0 ? '' : 'border-t border-slate-100'
+                          }`}
                         >
                           <div className="flex flex-wrap items-center gap-3">
                             <button
@@ -362,7 +370,7 @@ export default function ManageClientsPage() {
                               onClick={() =>
                                 setContactModal({ client: { id: c.id, name: c.name }, contact: k })
                               }
-                              className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-text shadow-sm transition hover:bg-slate-50"
+                              className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary-soft px-3 py-1 text-xs font-semibold text-primary shadow-sm transition hover:bg-primary-soft/70"
                             >
                               <Pencil className="h-3 w-3" />
                               Edit
@@ -398,7 +406,7 @@ export default function ManageClientsPage() {
               </div>
             ))}
             {pendingContactDelete ? (
-              <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/70 px-6 py-2.5 text-sm">
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 px-6 py-2.5 text-sm shadow-sm">
                 <span className="text-text">
                   <strong className="font-semibold">{pendingContactDelete.label}</strong>{' '}
                   has been deleted.{' '}

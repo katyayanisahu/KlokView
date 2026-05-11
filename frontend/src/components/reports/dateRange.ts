@@ -1,3 +1,5 @@
+import { startOfWeek as startOfWeekPref } from '@/utils/preferences';
+import type { WeekStart } from '@/api/accountSettings';
 import type { Period } from './PeriodSelector';
 
 export interface DateRange {
@@ -21,15 +23,6 @@ export function fromIso(iso: string): Date {
   return new Date(`${iso}T00:00:00`);
 }
 
-function startOfWeekMon(d: Date): Date {
-  const x = new Date(d);
-  const day = x.getDay(); // 0 Sun..6 Sat
-  const diff = day === 0 ? -6 : 1 - day;
-  x.setDate(x.getDate() + diff);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
 function startOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
 }
@@ -48,10 +41,19 @@ function endOfQuarter(d: Date): Date {
   return new Date(d.getFullYear(), q * 3 + 3, 0);
 }
 
-/** Compute the start/end ISO date pair for a Period anchored at `anchor`. */
-export function computeRange(period: Period, anchor: Date): DateRange {
+/** Compute the start/end ISO date pair for a Period anchored at `anchor`.
+ *
+ * `fiscalStartMonth` is 1-12 (1 = January = calendar year). When set to a
+ * non-January month, the `year` period uses fiscal year boundaries.
+ */
+export function computeRange(
+  period: Period,
+  anchor: Date,
+  weekStartsOn: WeekStart = 'monday',
+  fiscalStartMonth: number = 1,
+): DateRange {
   if (period === 'week') {
-    const start = startOfWeekMon(anchor);
+    const start = startOfWeekPref(anchor, weekStartsOn);
     const end = new Date(start);
     end.setDate(end.getDate() + 6);
     return { start: toIso(start), end: toIso(end) };
@@ -76,10 +78,15 @@ export function computeRange(period: Period, anchor: Date): DateRange {
     return { start: toIso(startOfQuarter(anchor)), end: toIso(endOfQuarter(anchor)) };
   }
   if (period === 'year') {
-    return {
-      start: toIso(new Date(anchor.getFullYear(), 0, 1)),
-      end: toIso(new Date(anchor.getFullYear(), 11, 31)),
-    };
+    const startMonthIdx = Math.max(0, Math.min(11, fiscalStartMonth - 1));
+    // The fiscal year that contains `anchor` starts in `startMonthIdx` of year Y,
+    // where Y = anchor.year if anchor.month >= startMonthIdx, else anchor.year - 1.
+    const fyStartYear =
+      anchor.getMonth() >= startMonthIdx ? anchor.getFullYear() : anchor.getFullYear() - 1;
+    const start = new Date(fyStartYear, startMonthIdx, 1);
+    // End is the day before the next fiscal year starts.
+    const end = new Date(fyStartYear + 1, startMonthIdx, 0);
+    return { start: toIso(start), end: toIso(end) };
   }
   if (period === 'all_time') {
     return { start: '2000-01-01', end: toIso(anchor) };

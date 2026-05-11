@@ -1,12 +1,14 @@
-import { ChevronDown, Download, Save } from 'lucide-react';
+import { ChevronDown, Download, History, Save } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import PeriodSelector, { type Period } from '@/components/reports/PeriodSelector';
 import { computeRange, formatRangeLabel, nudgeAnchor } from '@/components/reports/dateRange';
+import { useFiscalYearStartMonth, useWeekStart } from '@/utils/preferences';
 import { downloadCsv, timestampedFilename } from '@/components/reports/csvExport';
 import MultiSelectDropdown from '@/components/reports/MultiSelectDropdown';
 import SaveReportModal from '@/components/reports/SaveReportModal';
+import { useAuthStore } from '@/store/authStore';
 import {
   createSavedReport,
   getActivityLog,
@@ -50,6 +52,11 @@ function eventTypeOf(activity: string): string {
 }
 
 export default function ActivityLogReportPage() {
+  const currentUser = useAuthStore((s) => s.user);
+  const canOpenUserDetail =
+    currentUser?.role === 'owner' ||
+    currentUser?.role === 'admin' ||
+    currentUser?.role === 'manager';
   const [period, setPeriod] = useState<Period>('week');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [subTab, setSubTab] = useState<SubTab>('timesheet');
@@ -67,7 +74,12 @@ export default function ActivityLogReportPage() {
   const [ownedByFilter, setOwnedByFilter] = useState<string[]>([]);
   const [performedByFilter, setPerformedByFilter] = useState<string[]>([]);
 
-  const range = useMemo(() => computeRange(period, anchor), [period, anchor]);
+  const weekStartsOn = useWeekStart();
+  const fiscalStartMonth = useFiscalYearStartMonth();
+  const range = useMemo(
+    () => computeRange(period, anchor, weekStartsOn, fiscalStartMonth),
+    [period, anchor, weekStartsOn, fiscalStartMonth],
+  );
   const isAllTime = period === 'all_time';
 
   useEffect(() => {
@@ -237,10 +249,20 @@ export default function ActivityLogReportPage() {
 
   return (
     <div className="space-y-5">
-      {/* SECTION 1 — Controls Bar */}
-      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">Activity log</h2>
+      {/* SECTION 1 — Header card: title + date nav + save action */}
+      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3 pt-5 sm:px-6">
+          <div className="flex items-start gap-3">
+            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+              <History className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">Activity log</h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Timeline of timesheet, approval, and project events.
+              </p>
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => setSaveModalOpen(true)}
@@ -250,7 +272,7 @@ export default function ActivityLogReportPage() {
             Save report
           </button>
         </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t border-slate-100 bg-slate-50/50 px-4 py-3 sm:px-6">
           <PeriodSelector
             period={period}
             onPeriodChange={(next) => {
@@ -274,12 +296,12 @@ export default function ActivityLogReportPage() {
           ) : null}
         </div>
         {saveFlash ? (
-          <p className="mt-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent-dark">
+          <p className="mx-4 mb-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent-dark sm:mx-6">
             {saveFlash}
           </p>
         ) : null}
         {loadError ? (
-          <p className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-text/80">
+          <p className="mx-4 mb-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-text/80 sm:mx-6">
             {loadError}
           </p>
         ) : null}
@@ -378,7 +400,7 @@ export default function ActivityLogReportPage() {
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+              <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                 <th className="px-4 py-3 sm:px-5">Time</th>
                 <th className="px-3 py-3">Activity</th>
                 <th className="hidden px-3 py-3 md:table-cell">Client</th>
@@ -414,6 +436,7 @@ export default function ActivityLogReportPage() {
                       setOpenActionId((cur) => (cur === id ? null : id))
                     }
                     onView={goToSource}
+                    canOpenUserDetail={canOpenUserDetail}
                   />
                 ))
               )}
@@ -448,12 +471,14 @@ function ActivityDayGroup({
   openActionId,
   onToggleAction,
   onView,
+  canOpenUserDetail,
 }: {
   date: string;
   items: ActivityEvent[];
   openActionId: string | null;
   onToggleAction: (id: string) => void;
   onView: (event: ActivityEvent) => void;
+  canOpenUserDetail: boolean;
 }) {
   return (
     <>
@@ -462,29 +487,69 @@ function ActivityDayGroup({
           {date}
         </td>
       </tr>
-      {items.map((r) => (
-        <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-bg/40">
-          <td className="px-4 py-3 text-xs font-semibold text-muted sm:px-5">{r.time_label}</td>
-          <td className="px-3 py-3">
-            <span className="block text-text">{r.activity}</span>
-            {r.hours ? <span className="text-xs text-muted">{r.hours} hours</span> : null}
-          </td>
-          <td className="hidden px-3 py-3 text-text md:table-cell">{r.client}</td>
-          <td className="hidden px-3 py-3 md:table-cell">
-            {r.project ? (
-              <span className="font-semibold text-primary">{r.project}</span>
-            ) : (
-              <span className="text-muted">—</span>
-            )}
-          </td>
-          <td className="hidden px-3 py-3 text-text lg:table-cell">{r.task}</td>
-          <td className="px-4 py-3 sm:px-5">
-            {r.performed_by ? (
-              <span className="font-semibold text-primary">{r.performed_by}</span>
-            ) : (
-              <span className="text-muted">—</span>
-            )}
-          </td>
+      {items.map((r) => {
+        // Split the activity text so we can render the entry-date portion as a link.
+        const entryLabel = r.entry_date_label;
+        const activityHead =
+          entryLabel && r.activity.endsWith(entryLabel)
+            ? r.activity.slice(0, r.activity.length - entryLabel.length)
+            : r.activity;
+        const dateLink = r.entry_date ? `/time?date=${r.entry_date}` : null;
+        return (
+          <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-bg/40">
+            <td className="px-4 py-3 text-xs font-semibold text-muted sm:px-5">{r.time_label}</td>
+            <td className="px-3 py-3">
+              <span className="block text-text">
+                {activityHead}
+                {entryLabel ? (
+                  dateLink ? (
+                    <Link
+                      to={dateLink}
+                      className="font-semibold text-primary hover:underline"
+                    >
+                      {entryLabel}
+                    </Link>
+                  ) : (
+                    <span className="font-semibold text-text">{entryLabel}</span>
+                  )
+                ) : null}
+              </span>
+              {r.hours ? <span className="text-xs text-muted">{r.hours} hours</span> : null}
+            </td>
+            <td className="hidden px-3 py-3 text-text md:table-cell">{r.client}</td>
+            <td className="hidden px-3 py-3 md:table-cell">
+              {r.project ? (
+                r.project_id ? (
+                  <Link
+                    to={`/projects/${r.project_id}`}
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    {r.project}
+                  </Link>
+                ) : (
+                  <span className="font-semibold text-primary">{r.project}</span>
+                )
+              ) : (
+                <span className="text-muted">—</span>
+              )}
+            </td>
+            <td className="hidden px-3 py-3 text-text lg:table-cell">{r.task}</td>
+            <td className="px-4 py-3 sm:px-5">
+              {r.performed_by ? (
+                r.performer_id && canOpenUserDetail ? (
+                  <Link
+                    to={`/team/${r.performer_id}`}
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    {r.performed_by}
+                  </Link>
+                ) : (
+                  <span className="font-semibold text-primary">{r.performed_by}</span>
+                )
+              ) : (
+                <span className="text-muted">—</span>
+              )}
+            </td>
           <td className="px-4 py-3 text-right sm:px-5">
             <div className="relative inline-block">
               <button
@@ -493,7 +558,7 @@ function ActivityDayGroup({
                 className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-text transition hover:bg-slate-100"
               >
                 Actions
-                <ChevronDown className="h-3 w-3" />
+                <ChevronDown className="h-4 w-4 text-muted" />
               </button>
               {openActionId === r.id ? (
                 <div className="absolute right-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white text-xs shadow-lg">
@@ -513,7 +578,8 @@ function ActivityDayGroup({
             </div>
           </td>
         </tr>
-      ))}
+        );
+      })}
     </>
   );
 }

@@ -7,7 +7,6 @@ import {
   Edit3,
   FolderKanban,
   FolderPlus,
-  MoreHorizontal,
   Pin,
   Plus,
   RotateCcw,
@@ -32,7 +31,8 @@ import {
 import { listUsers } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 import { extractApiError } from '@/utils/errors';
-import { formatBudget, PROJECT_TYPE_LABEL } from '@/utils/format';
+import { formatBudget, formatCurrency, PROJECT_TYPE_LABEL } from '@/utils/format';
+import { useAccountSettingsStore } from '@/store/accountSettingsStore';
 import type { ProjectListItem, User } from '@/types';
 
 type StatusFilter = 'active' | 'archived';
@@ -59,6 +59,10 @@ function savePinned(set: Set<number>) {
 }
 
 export default function ProjectsListPage() {
+  // Re-render when the workspace currency / number_format changes in Settings.
+  useAccountSettingsStore((s) => s.settings?.currency);
+  useAccountSettingsStore((s) => s.settings?.number_format);
+
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const canEdit = user?.role === 'owner' || user?.role === 'admin';
@@ -357,7 +361,7 @@ export default function ProjectsListPage() {
               onClick={() => navigate('/projects/new')}
               className="btn-primary"
             >
-              <Plus className="mr-1.5 h-4 w-4" />
+              <Plus className="h-4 w-4" />
               New project
             </button>
           ) : null
@@ -367,7 +371,7 @@ export default function ProjectsListPage() {
       {!loading && !error && projects.length > 0 ? (
         <div className="border-b border-slate-200 bg-white">
           <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
               <button
                 type="button"
                 onClick={() => setStatus('active')}
@@ -444,7 +448,7 @@ export default function ProjectsListPage() {
       <main className="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
         {/* Search + bulk action bar */}
         <div className="mb-5 flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[260px]">
+          <div className="relative w-full sm:min-w-[260px] sm:flex-1">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
             <input
               value={search}
@@ -455,12 +459,12 @@ export default function ProjectsListPage() {
           </div>
 
           {canEdit ? (
-            <button type="button" onClick={() => setImportOpen(true)} className="btn-outline">
+            <button type="button" onClick={() => setImportOpen(true)} className="btn-outline flex-1 justify-center sm:flex-none">
               <Upload className="h-4 w-4" />
               Import
             </button>
           ) : null}
-          <button type="button" onClick={() => setExportOpen(true)} className="btn-outline">
+          <button type="button" onClick={() => setExportOpen(true)} className="btn-outline flex-1 justify-center sm:flex-none">
             <Download className="h-4 w-4" />
             Export
           </button>
@@ -473,7 +477,7 @@ export default function ProjectsListPage() {
                 className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary-soft px-4 py-2 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary-soft/70"
               >
                 {selectedIds.size} selected
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown className="h-4 w-4" />
               </button>
               {bulkOpen ? (
                 <>
@@ -566,7 +570,7 @@ export default function ProjectsListPage() {
             </p>
             {canEdit && status === 'active' ? (
               <Link to="/projects/new" className="btn-primary mt-6">
-                <Plus className="mr-1.5 h-4 w-4" />
+                <Plus className="h-4 w-4" />
                 New project
               </Link>
             ) : null}
@@ -738,7 +742,7 @@ function ChipSelect<T extends number | 'all'>({
         <span className={isActive ? 'font-semibold' : ''}>
           {current?.label ?? 'All'}
         </span>
-        <ChevronDown className="h-3.5 w-3.5" />
+        <ChevronDown className="h-4 w-4 text-muted" />
       </button>
       {open ? (
         <>
@@ -976,8 +980,8 @@ function ProjectRow({
 
           {/* Metrics grid */}
           <div
-            className={`mt-2.5 grid grid-cols-1 gap-x-6 gap-y-1 text-xs ${
-              canEdit ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
+            className={`mt-2.5 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:gap-x-6 ${
+              canEdit ? 'sm:grid-cols-2 lg:grid-cols-4 lg:gap-y-1' : 'sm:grid-cols-3 sm:gap-y-1'
             }`}
           >
             <Metric
@@ -1009,7 +1013,7 @@ function ProjectRow({
             {canEdit ? (
               <Metric
                 label="Costs"
-                value={`$${Number.parseFloat(project.cost_amount ?? '0').toFixed(2)}`}
+                value={formatCurrency(project.cost_amount ?? '0')}
               />
             ) : null}
           </div>
@@ -1051,7 +1055,7 @@ function ProjectRow({
               aria-label="Actions"
             >
               Actions
-              <ChevronDown className="h-3 w-3" />
+              <ChevronDown className="h-4 w-4 text-muted" />
             </button>
             {isOpen ? (
               <>
@@ -1087,7 +1091,7 @@ function ProjectRow({
                         onClick={onArchive}
                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-warning transition hover:bg-warning/10"
                       >
-                        <MoreHorizontal className="h-4 w-4" /> Archive
+                        <Archive className="h-4 w-4" /> Archive
                       </button>
                       <button
                         type="button"
@@ -1104,7 +1108,7 @@ function ProjectRow({
                         onClick={onRestore}
                         className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-bg"
                       >
-                        <Edit3 className="h-4 w-4" /> Restore
+                        <RotateCcw className="h-4 w-4" /> Restore
                       </button>
                       <button
                         type="button"

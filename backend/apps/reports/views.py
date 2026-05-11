@@ -27,6 +27,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.module_permissions import module_required
 from apps.projects.models import ProjectMembership
 from apps.timesheets.models import TimeEntry
 
@@ -86,7 +87,7 @@ class ProfitabilityReportView(APIView):
     plus workspace totals over the requested window.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, module_required('reports')]
 
     def get(self, request):
         today = date.today()
@@ -281,7 +282,7 @@ class TimeReportView(APIView):
     Hours-only — no money. Mirrors Harvest's "Time" report tab.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, module_required('reports')]
 
     def get(self, request):
         today = date.today()
@@ -392,6 +393,7 @@ class TimeReportView(APIView):
             if is_billable:
                 trow['billable_hours'] += hours
             trow['billable_amount'] += billable_amount
+            trow['cost'] += cost
             seen_user_capacity[uid] = entry.user.weekly_capacity_hours or Decimal('0')
 
             task = entry.project_task.task if entry.project_task else None
@@ -479,6 +481,39 @@ class TimeReportView(APIView):
                 })
             task_breakdown.sort(key=lambda x: x['name'].lower())
 
+        # Per-team-member task breakdown — also gated on project_id.
+        # Inverse grouping of task_member_lookup: by user instead of by task.
+        team_breakdown: list[dict] = []
+        if project_id_param:
+            tasks_by_user: dict[int, list[dict]] = defaultdict(list)
+            for m in task_member_lookup.values():
+                tasks_by_user[m['user_id']].append({
+                    'task_id': m['task_id'],
+                    'name': tasks[m['task_id']]['name'],
+                    'hours': f'{m["hours"]:.2f}',
+                    'billable_hours': f'{m["billable_hours"]:.2f}',
+                    'billable_percent': _pct(m['billable_hours'], m['hours']),
+                    'billable_amount': f'{m["billable_amount"]:.2f}',
+                    'cost': f'{m["cost"]:.2f}',
+                })
+            for uid, trow in team.items():
+                member_tasks = sorted(
+                    tasks_by_user.get(uid, []),
+                    key=lambda x: x['name'].lower(),
+                )
+                team_breakdown.append({
+                    'id': uid,
+                    'name': trow['name'],
+                    'initials': trow.get('initials', ''),
+                    'hours': f'{trow["hours"]:.2f}',
+                    'billable_hours': f'{trow["billable_hours"]:.2f}',
+                    'billable_percent': _pct(trow['billable_hours'], trow['hours']),
+                    'billable_amount': f'{trow.get("billable_amount", Decimal("0")):.2f}',
+                    'cost': f'{trow.get("cost", Decimal("0")):.2f}',
+                    'tasks': member_tasks,
+                })
+            team_breakdown.sort(key=lambda x: x['name'].lower())
+
         return Response({
             'window': {'start': start.isoformat(), 'end': end.isoformat()},
             'totals': {
@@ -493,6 +528,7 @@ class TimeReportView(APIView):
             'team': [_finalize_time_row(r) for r in team.values()],
             'tasks': [_finalize_time_row(r) for r in tasks.values()],
             'task_breakdown': task_breakdown,
+            'team_breakdown': team_breakdown,
         })
 
 
@@ -555,7 +591,7 @@ class ActivityLogReportView(APIView):
     Frontend mock used the same shape, so the response is a single flat list.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, module_required('activity_log')]
 
     def get(self, request):
         from apps.projects.models import Project
@@ -580,18 +616,23 @@ class ActivityLogReportView(APIView):
             )
             for e in entries_qs:
                 created = e.created_at
+                entry_date_label = e.date.strftime('%d %b %Y') if e.date else ''
                 events.append({
                     'id': f'te-{e.id}',
                     'type': 'timesheet',
                     'when': created.isoformat(),
                     'date_label': _date_label(created),
                     'time_label': _time_label(created),
-                    'activity': f'Tracked {e.hours} hr',
+                    'activity': f'Created a time entry for {entry_date_label}'.strip(),
+                    'entry_date': e.date.isoformat() if e.date else None,
+                    'entry_date_label': entry_date_label,
                     'hours': f'{e.hours}',
                     'client': e.project.client.name,
                     'project': e.project.name,
+                    'project_id': e.project_id,
                     'task': e.project_task.task.name if e.project_task and e.project_task.task else '',
                     'performed_by': e.user.full_name or e.user.email,
+                    'performer_id': e.user_id,
                 })
 
         # ---- Submissions (timesheet approvals) ----
@@ -624,8 +665,10 @@ class ActivityLogReportView(APIView):
                     'activity': f'Submitted timesheet ({s.start_date} – {s.end_date})',
                     'client': '',
                     'project': '',
+                    'project_id': None,
                     'task': '',
                     'performed_by': s.user.full_name or s.user.email,
+                    'performer_id': s.user_id,
                 })
                 # Decision event (if any)
                 if s.decided_at:
@@ -638,9 +681,11 @@ class ActivityLogReportView(APIView):
                         'activity': f'{s.status.capitalize()} timesheet ({s.start_date} – {s.end_date})',
                         'client': '',
                         'project': '',
+                        'project_id': None,
                         'task': '',
                         'performed_by': (s.decided_by.full_name or s.decided_by.email)
                             if s.decided_by else 'System',
+                        'performer_id': s.decided_by_id if s.decided_by_id else None,
                     })
 
         # ---- Projects created ----
@@ -660,8 +705,10 @@ class ActivityLogReportView(APIView):
                     'activity': 'Created project',
                     'client': p.client.name,
                     'project': p.name,
+                    'project_id': p.id,
                     'task': '',
                     'performed_by': '',
+                    'performer_id': None,
                 })
 
         # Sort everything chronologically (newest first)
@@ -710,7 +757,7 @@ class SavedReportViewSet(viewsets.ModelViewSet):
     """
 
     serializer_class = SavedReportSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, module_required('reports')]
 
     def get_queryset(self):
         user = self.request.user

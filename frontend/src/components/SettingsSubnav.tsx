@@ -1,4 +1,4 @@
-import { CreditCard, Download, KeyRound, Plug, Puzzle, Settings as SettingsIcon } from 'lucide-react';
+import { Download, KeyRound, Plug, Puzzle, Settings as SettingsIcon } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
@@ -8,10 +8,7 @@ interface SettingsSection {
   icon: LucideIcon;
 }
 
-// Mirrors the Harvest "Settings" sidebar — only Integrations is wired up
-// today; the rest are placeholders for future epics so the layout matches.
 const settingsSections: SettingsSection[] = [
-  { label: 'Billing', to: '/settings/billing', icon: CreditCard },
   { label: 'Preferences', to: '/settings/preferences', icon: SettingsIcon },
   { label: 'Integrations', to: '/settings/integrations', icon: Plug },
   { label: 'Modules', to: '/settings/modules', icon: Puzzle },
@@ -21,24 +18,39 @@ const settingsSections: SettingsSection[] = [
 
 export default function SettingsSubnav() {
   return (
-    <aside className="w-56 flex-none border-r border-slate-200 bg-white py-6">
-      <nav className="flex flex-col">
+    <aside className="lg:sticky lg:top-20 lg:self-start">
+      <nav className="flex flex-col gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
         {settingsSections.map(({ label, to, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
+            end
             className={({ isActive }) =>
-              `relative flex items-center gap-2 border-l-[3px] px-5 py-2.5 text-sm font-medium transition ${
+              `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
                 isActive
-                  ? 'border-primary bg-primary-soft/40 text-primary'
-                  : 'border-transparent text-muted hover:bg-slate-50 hover:text-text'
+                  ? 'bg-primary-soft/60'
+                  : 'text-muted hover:bg-primary-soft/40 hover:text-primary'
               }`
             }
           >
             {({ isActive }) => (
               <>
-                <Icon className={`h-4 w-4 ${isActive ? 'text-primary' : ''}`} />
-                <span>{label}</span>
+                <span
+                  className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg transition ${
+                    isActive
+                      ? 'bg-primary text-white shadow-sm'
+                      : 'bg-primary-soft/60 text-primary group-hover:bg-primary-soft'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span
+                  className={
+                    isActive ? 'font-bold text-text' : 'font-semibold'
+                  }
+                >
+                  {label}
+                </span>
               </>
             )}
           </NavLink>

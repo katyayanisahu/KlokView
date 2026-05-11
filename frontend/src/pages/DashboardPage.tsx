@@ -12,6 +12,7 @@ import {
   Pencil,
   Play,
   Plus,
+  RefreshCw,
   Send,
   Trash2,
   Users,
@@ -33,10 +34,20 @@ import {
 } from '@/api/integrations';
 import OutlookEventPicker from '@/components/OutlookEventPicker';
 import {
+  formatHoursDisplay,
+  startOfWeek as startOfWeekPref,
+  getDayLabels,
+  useTimerMode,
+  useWeekStart,
+} from '@/utils/preferences';
+import { useAccountSettingsStore } from '@/store/accountSettingsStore';
+import type { WeekStart } from '@/api/accountSettings';
+import {
   approveSubmission,
   createSubmission,
   listSubmissions,
   rejectSubmission,
+  unapproveSubmission,
   withdrawSubmission,
 } from '@/api/submissions';
 import {
@@ -71,24 +82,24 @@ function ymd(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-function startOfWeek(reference: Date): Date {
-  const d = new Date(reference);
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  const diff = (day + 6) % 7;
-  d.setDate(d.getDate() - diff);
-  return d;
+function startOfWeek(reference: Date, weekStartsOn: WeekStart = 'monday'): Date {
+  return startOfWeekPref(reference, weekStartsOn);
 }
 
-function buildWeekDays(reference: Date, hoursByDate: Map<string, number>): {
+function buildWeekDays(
+  reference: Date,
+  hoursByDate: Map<string, number>,
+  weekStartsOn: WeekStart = 'monday',
+): {
   label: string;
   shortLabel: string;
   date: Date;
   hours: number;
 }[] {
-  const start = startOfWeek(reference);
-  const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const shorts = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const start = startOfWeek(reference, weekStartsOn);
+  const labels = getDayLabels(weekStartsOn);
+  // Single-letter abbreviations matched to labels order
+  const shorts = labels.map((l) => l[0]);
   return labels.map((label, idx) => {
     const date = new Date(start);
     date.setDate(start.getDate() + idx);
@@ -102,7 +113,10 @@ function buildWeekDays(reference: Date, hoursByDate: Map<string, number>): {
 }
 
 function formatHours(hours: number): string {
-  if (!hours) return '0:00';
+  // Respect the workspace `time_display` preference (decimal vs HH:MM).
+  const mode = useAccountSettingsStore.getState().settings?.time_display ?? 'hh_mm';
+  if (!hours) return mode === 'decimal' ? '0.00' : '0:00';
+  if (mode === 'decimal') return hours.toFixed(2);
   const h = Math.floor(hours);
   const m = Math.round((hours - h) * 60);
   return `${h}:${m.toString().padStart(2, '0')}`;
@@ -180,7 +194,7 @@ function ApprovalSelect({
         <span className={`font-bold ${isActive ? 'text-primary' : 'text-text'}`}>
           {current?.label ?? 'All'}
         </span>
-        <ChevronDown className="h-4 w-4" />
+        <ChevronDown className="h-4 w-4 text-muted" />
       </button>
       {open ? (
         <>
@@ -361,8 +375,8 @@ function ApprovalPanel({
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <header className="rounded-t-2xl border-b border-slate-200 bg-gradient-to-br from-primary-soft/40 via-white to-bg px-6 py-6">
-        <h2 className="font-heading text-3xl font-bold text-text">Approval</h2>
+      <header className="rounded-t-2xl border-b border-slate-200 bg-gradient-to-br from-primary-soft/40 via-white to-bg px-4 py-5 sm:px-6 sm:py-6">
+        <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">Approval</h2>
 
         {/* Top control row — Range + date navigator on left, Status + Group by on right */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -422,7 +436,7 @@ function ApprovalPanel({
               ) : null}
             </div>
           ) : null}
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
             <ApprovalSelect
               label="Status"
               value={statusFilter}
@@ -448,8 +462,7 @@ function ApprovalPanel({
         </div>
 
         <div className="mt-5 border-t border-slate-200 pt-4">
-          <p className="text-base font-bold uppercase tracking-wider text-text/70">Filter</p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <ApprovalSelect
               label="Client"
               value={clientFilter}
@@ -488,16 +501,17 @@ function ApprovalPanel({
             <button
               type="button"
               onClick={onRefresh}
-              className="ml-auto rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-base font-bold text-text shadow-sm transition hover:border-primary/40 hover:bg-primary-soft/40 hover:text-primary"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-primary/20 bg-primary-soft px-5 py-2.5 text-base font-bold text-primary shadow-sm transition hover:border-primary/40 hover:bg-primary-soft/70 sm:ml-auto sm:w-auto"
             >
+              <RefreshCw className="h-4 w-4" />
               Refresh
             </button>
           </div>
         </div>
 
         {/* Total time summary card — Harvest layout */}
-        <div className="mt-5 rounded-xl border-2 border-primary/15 bg-white px-6 py-5 shadow-md">
-          <div className="flex flex-wrap items-center justify-between gap-6">
+        <div className="mt-5 rounded-xl border-2 border-primary/15 bg-white px-4 py-4 shadow-md sm:px-6 sm:py-5">
+          <div className="flex flex-wrap items-center justify-between gap-4 sm:gap-6">
             <div>
               <p className="text-base font-bold uppercase tracking-wider text-text/70">
                 Total time
@@ -525,7 +539,7 @@ function ApprovalPanel({
                 <span className="text-base font-semibold text-text/70">({pct(totals.nonBillable)}%)</span>
               </div>
             </div>
-            <span className="rounded-full bg-primary px-5 py-2 text-base font-bold text-white shadow-sm">
+            <span className="rounded-full bg-primary-soft px-4 py-1.5 text-sm font-bold text-primary ring-1 ring-primary/20">
               {filteredSubmissions.length}{' '}
               {filteredSubmissions.length === 1 ? 'submission' : 'submissions'}
             </span>
@@ -855,7 +869,7 @@ function EntryRow({
 }) {
   return (
     <li
-      className={`grid grid-cols-[1fr_100px_auto] items-start gap-4 px-5 py-4 transition ${
+      className={`grid grid-cols-[1fr_56px_auto] items-start gap-2 px-3 py-4 transition sm:grid-cols-[1fr_100px_auto] sm:gap-4 sm:px-5 ${
         locked
           ? 'bg-slate-100'
           : entry.is_running
@@ -866,9 +880,8 @@ function EntryRow({
       }`}
     >
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="font-heading text-base font-bold text-text">{entry.project_name}</p>
-          <span className="text-sm text-text/60">·</span>
+        <p className="font-heading text-base font-bold text-text">{entry.project_name}</p>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
           <p className="text-sm font-medium text-text/70">{entry.client_name}</p>
           {entry.is_running ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-xs font-semibold text-text">
@@ -901,7 +914,7 @@ function EntryRow({
           ? formatTimerElapsed(entry, tickNow)
           : formatHoursDecimal(num(entry.hours))}
       </p>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5 sm:gap-1">
         {locked ? (
           <span
             title="This entry has been approved and locked."
@@ -915,10 +928,11 @@ function EntryRow({
             type="button"
             onClick={onStop}
             disabled={timerBusy}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-danger px-2.5 text-xs font-semibold text-white transition hover:bg-danger/90 disabled:opacity-50"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-danger text-xs font-semibold text-white transition hover:bg-danger/90 disabled:opacity-50 sm:w-auto sm:gap-1.5 sm:px-2.5"
+            aria-label="Stop timer"
           >
             <Pause className="h-3.5 w-3.5" />
-            Stop
+            <span className="hidden sm:inline">Stop</span>
           </button>
         ) : (
           <>
@@ -927,16 +941,16 @@ function EntryRow({
               onClick={() => onStartFromRow(entry)}
               disabled={timerBusy}
               title={hasRunningTimer ? 'Stop the running timer and start this one' : 'Start timer for this entry'}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-accent px-3 text-xs font-bold text-text shadow-sm transition hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-accent text-xs font-bold text-text shadow-sm transition hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:gap-1.5 sm:px-3"
               aria-label="Start timer"
             >
               <Play className="h-3.5 w-3.5" />
-              Start
+              <span className="hidden sm:inline">Start</span>
             </button>
             <button
               type="button"
               onClick={() => onEdit(entry)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-slate-100 hover:text-text"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted transition hover:bg-slate-100 hover:text-text sm:h-8 sm:w-8"
               aria-label="Edit entry"
             >
               <Pencil className="h-3.5 w-3.5" />
@@ -944,7 +958,7 @@ function EntryRow({
             <button
               type="button"
               onClick={() => onDelete(entry)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-danger/10 hover:text-danger"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted transition hover:bg-danger/10 hover:text-danger sm:h-8 sm:w-8"
               aria-label="Delete entry"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -1011,7 +1025,7 @@ function CalendarPopover({
   return (
     <>
       <div className="fixed inset-0 z-10" onClick={onClose} aria-hidden="true" />
-      <div className="absolute left-0 top-full z-20 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+      <div className="absolute right-0 top-full z-20 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-3 shadow-lg sm:left-0 sm:right-auto">
         <div className="mb-2 flex items-center justify-between">
           <button
             type="button"
@@ -1090,6 +1104,8 @@ export default function DashboardPage() {
   const role = user?.role ?? 'member';
   const canSeeTeammates = role === 'admin' || role === 'owner' || role === 'manager';
   const { confirmDialog, ask } = useConfirm();
+  const weekStartsOn = useWeekStart();
+  const timerMode = useTimerMode();
 
   const [currentDate, setCurrentDate] = useState<Date>(() => {
     const d = new Date();
@@ -1106,6 +1122,8 @@ export default function DashboardPage() {
   const [projectId, setProjectId] = useState<number | ''>('');
   const [projectTaskId, setProjectTaskId] = useState<number | ''>('');
   const [hoursInput, setHoursInput] = useState('');
+  const [startTimeInput, setStartTimeInput] = useState('');
+  const [endTimeInput, setEndTimeInput] = useState('');
   const [notesInput, setNotesInput] = useState('');
   const [jiraKeyInput, setJiraKeyInput] = useState('');
   const [billable, setBillable] = useState(true);
@@ -1262,7 +1280,7 @@ export default function DashboardPage() {
   }, [projectTaskId, projectTasks, editingId]);
 
   // Load entries for the active week
-  const weekStart = useMemo(() => startOfWeek(currentDate), [currentDate]);
+  const weekStart = useMemo(() => startOfWeek(currentDate, weekStartsOn), [currentDate, weekStartsOn]);
   const weekEndStr = useMemo(() => {
     const end = new Date(weekStart);
     end.setDate(weekStart.getDate() + 6);
@@ -1362,8 +1380,8 @@ export default function DashboardPage() {
   }, [weekEntries, effectiveUserId]);
 
   const weekDays = useMemo(
-    () => buildWeekDays(currentDate, hoursByDate),
-    [currentDate, hoursByDate],
+    () => buildWeekDays(currentDate, hoursByDate, weekStartsOn),
+    [currentDate, hoursByDate, weekStartsOn],
   );
 
   const dayTotal = dayEntries.reduce((sum, e) => sum + num(e.hours), 0);
@@ -1395,11 +1413,32 @@ export default function DashboardPage() {
     setProjectId('');
     setProjectTaskId('');
     setHoursInput('');
+    setStartTimeInput('');
+    setEndTimeInput('');
     setNotesInput('');
     setJiraKeyInput('');
     setBillable(true);
     setFormError(null);
     setEditingId(null);
+  };
+
+  // Convert "HH:MM" string to minutes since midnight. Returns null if invalid.
+  const parseTimeToMinutes = (s: string): number | null => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
+    if (!m) return null;
+    const h = Number.parseInt(m[1], 10);
+    const mm = Number.parseInt(m[2], 10);
+    if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
+    return h * 60 + mm;
+  };
+
+  // Compute decimal hours from start/end "HH:MM" times. Returns "" on invalid input.
+  const hoursFromStartEnd = (start: string, end: string): string => {
+    const s = parseTimeToMinutes(start);
+    const e = parseTimeToMinutes(end);
+    if (s == null || e == null || e <= s) return '';
+    const diffHours = (e - s) / 60;
+    return diffHours.toFixed(2);
   };
 
   const handleSave = async () => {
@@ -1412,8 +1451,25 @@ export default function DashboardPage() {
       setFormError('Pick a task.');
       return;
     }
-    if (!hoursInput.trim()) {
-      setFormError('Enter hours.');
+
+    // In start_end mode, derive hours from start/end times. If both inputs are
+    // present, they take precedence over hoursInput. If only one is filled,
+    // fall back to hoursInput (e.g. when editing without retyping times).
+    let hoursToSave = hoursInput.trim();
+    if (timerMode === 'start_end' && startTimeInput.trim() && endTimeInput.trim()) {
+      const derived = hoursFromStartEnd(startTimeInput, endTimeInput);
+      if (!derived) {
+        setFormError('End time must be after start time (use HH:MM, 24-hour).');
+        return;
+      }
+      hoursToSave = derived;
+    }
+    if (!hoursToSave) {
+      setFormError(
+        timerMode === 'start_end'
+          ? 'Enter start and end times.'
+          : 'Enter hours.',
+      );
       return;
     }
     setSaving(true);
@@ -1423,7 +1479,7 @@ export default function DashboardPage() {
           project_id: projectId as number,
           project_task_id: projectTaskId as number,
           date: activeDateStr,
-          hours: hoursInput.trim(),
+          hours: hoursToSave,
           notes: notesInput.trim(),
           is_billable: billable,
           jira_issue_key: jiraKeyInput.trim(),
@@ -1433,7 +1489,7 @@ export default function DashboardPage() {
           project_id: projectId as number,
           project_task_id: projectTaskId as number,
           date: activeDateStr,
-          hours: hoursInput.trim(),
+          hours: hoursToSave,
           notes: notesInput.trim(),
           is_billable: billable,
           jira_issue_key: jiraKeyInput.trim(),
@@ -1504,7 +1560,7 @@ export default function DashboardPage() {
   };
 
   const handleDisconnectOutlook = async () => {
-    if (!window.confirm('Disconnect TrackFlow from your Outlook calendar?')) return;
+    if (!window.confirm('Disconnect KlokView from your Outlook calendar?')) return;
     try {
       await disconnectOutlook();
       setOutlookStatus({ connected: false, email: null, connected_at: null, configured: outlookStatus?.configured ?? true });
@@ -1647,7 +1703,7 @@ export default function DashboardPage() {
       };
     }
     if (approvalRange === 'week') {
-      const start = startOfWeek(anchor);
+      const start = startOfWeek(anchor, weekStartsOn);
       const end = new Date(start);
       end.setDate(start.getDate() + 6);
       return {
@@ -1724,10 +1780,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Manager-initiated "withdraw approval" — reverts an approved submission back
-  // to submitted so it can be re-decided. Backend exposes /withdraw/ for the
-  // submitter only; for the approver flow we re-use the same endpoint as a
-  // best-effort revert, falling back to a friendly error if the backend says no.
   const handleWithdrawApprovalAtTopLevel = async () => {
     const approvedRows = pendingSubmissions.filter((s) => s.status === 'approved');
     if (approvedRows.length === 0) return;
@@ -1743,11 +1795,11 @@ export default function DashboardPage() {
     setApprovalError(null);
     try {
       for (const s of approvedRows) {
-        await withdrawSubmission(s.id);
+        await unapproveSubmission(s.id);
       }
       refetchPendingSubmissions();
     } catch (err) {
-      setApprovalError(extractApiError(err, 'Could not withdraw approval. Backend may not support this yet.'));
+      setApprovalError(extractApiError(err, 'Could not withdraw approval.'));
     }
   };
 
@@ -2217,9 +2269,24 @@ export default function DashboardPage() {
                   ) : null}
                 </div>
                 {activeSubmission && activeSubmission.status === 'submitted' ? (
-                  <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-primary-soft px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-primary">
-                    Pending approval
-                  </span>
+                  <>
+                    <span
+                      className="ml-1 inline-flex items-center gap-1 rounded-full bg-primary-soft px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-primary"
+                      title={`Submitted ${new Date(activeSubmission.submitted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · entries locked`}
+                    >
+                      Pending approval
+                    </span>
+                    {isOwnTimesheet ? (
+                      <button
+                        type="button"
+                        onClick={handleWithdrawSubmission}
+                        disabled={submissionBusy}
+                        className="ml-1 inline-flex items-center rounded-md border border-primary/30 bg-white px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-primary-soft disabled:opacity-50"
+                      >
+                        {submissionBusy ? 'Withdrawing…' : 'Withdraw'}
+                      </button>
+                    ) : null}
+                  </>
                 ) : activeSubmission && activeSubmission.status === 'approved' ? (
                   <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-accent-dark">
                     Approved
@@ -2245,24 +2312,30 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={goToday}
-                  className="ml-2 inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-slate-50 hover:text-text"
+                  className="ml-2 hidden items-center gap-1.5 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-slate-50 hover:text-text sm:inline-flex"
                 >
                   <Calendar className="h-3.5 w-3.5" />
                   Jump to today
                 </button>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex items-center gap-6 border-b border-slate-200">
+              <div className="flex flex-wrap items-center gap-4">
+                <div
+                  role="tablist"
+                  aria-label="Timesheet view"
+                  className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1"
+                >
                   {(['day', 'week'] as const).map((v) => (
                     <button
                       key={v}
                       type="button"
+                      role="tab"
+                      aria-selected={view === v}
                       onClick={() => setView(v)}
-                      className={`relative -mb-px border-b-2 px-1 pb-2 text-sm font-semibold capitalize transition ${
+                      className={`rounded-md px-5 py-1.5 text-sm font-bold capitalize transition ${
                         view === v
-                          ? 'border-primary text-primary'
-                          : 'border-transparent text-muted hover:text-text'
+                          ? 'bg-primary text-white shadow-sm'
+                          : 'text-muted hover:bg-slate-200/60 hover:text-text'
                       }`}
                     >
                       {v}
@@ -2284,7 +2357,7 @@ export default function DashboardPage() {
                       {viewingUserId === null
                         ? 'Your timesheet'
                         : teammates.find((u) => u.id === viewingUserId)?.full_name ?? 'Teammate'}
-                      <ChevronDown className="h-3.5 w-3.5" />
+                      <ChevronDown className="h-4 w-4 text-muted" />
                     </button>
                     {teammatesMenuOpen ? (
                       <>
@@ -2293,7 +2366,7 @@ export default function DashboardPage() {
                           onClick={() => setTeammatesMenuOpen(false)}
                           aria-hidden="true"
                         />
-                        <div className="absolute right-0 z-20 mt-1 max-h-72 w-60 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                        <div className="absolute left-0 z-20 mt-1 max-h-72 w-60 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg sm:left-auto sm:right-0">
                           <button
                             type="button"
                             onClick={() => {
@@ -2381,10 +2454,10 @@ export default function DashboardPage() {
               </div>
             ) : null}
 
-            {activeSubmission && activeSubmission.status !== 'approved' && view !== 'week' ? (
+            {activeSubmission && activeSubmission.status === 'rejected' && view !== 'week' ? (
               <SubmissionStatusBanner
                 submission={activeSubmission}
-                canWithdraw={isOwnTimesheet && activeSubmission.status === 'submitted'}
+                canWithdraw={false}
                 busy={submissionBusy}
                 onWithdraw={handleWithdrawSubmission}
               />
@@ -2554,7 +2627,7 @@ export default function DashboardPage() {
                           {selectedProject
                             ? `${selectedProject.client_name} · ${selectedProject.name}`
                             : 'Choose a project…'}
-                          <ChevronDown className="h-4 w-4" />
+                          <ChevronDown className="h-4 w-4 text-muted" />
                         </button>
                         {projectMenuOpen ? (
                           <>
@@ -2617,7 +2690,7 @@ export default function DashboardPage() {
                             : selectedTask
                               ? selectedTask.task_name
                               : 'Choose a task…'}
-                          <ChevronDown className="h-4 w-4" />
+                          <ChevronDown className="h-4 w-4 text-muted" />
                         </button>
                         {taskMenuOpen ? (
                           <>
@@ -2663,48 +2736,92 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    {/* Notes + Hours side-by-side (Harvest layout) */}
-                    <div className="grid grid-cols-[1fr_7rem] gap-3">
-                      <label className="block">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-muted">
-                          Notes <span className="font-normal normal-case text-muted/70">(optional)</span>
-                        </span>
-                        <textarea
-                          rows={3}
-                          value={notesInput}
-                          onChange={(e) => setNotesInput(e.target.value)}
-                          placeholder="What did you work on?"
-                          className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-muted">
-                          Hours
-                        </span>
-                        <input
-                          type="text"
-                          value={hoursInput}
-                          onChange={(e) => setHoursInput(e.target.value)}
-                          placeholder="0:00"
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-center text-sm font-mono text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                        />
-                      </label>
-                    </div>
-
-                    {/* Jira issue — optional. Tags this entry to a Jira ticket so the
-                        Forge App panel can show it inside Jira (Epic 7). */}
-                    <label className="block">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-muted">
-                        Jira issue <span className="font-normal normal-case text-muted/70">(optional)</span>
-                      </span>
-                      <input
-                        type="text"
-                        value={jiraKeyInput}
-                        onChange={(e) => setJiraKeyInput(e.target.value.toUpperCase())}
-                        placeholder="e.g. PROJ-123"
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-mono uppercase text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      />
-                    </label>
+                    {timerMode === 'start_end' ? (
+                      // Harvest start/end layout: Notes full-width above, Start to End = Total row below.
+                      <div className="space-y-3">
+                        <label className="block">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+                            Notes <span className="font-normal normal-case text-muted/70">(optional)</span>
+                          </span>
+                          <textarea
+                            rows={3}
+                            value={notesInput}
+                            onChange={(e) => setNotesInput(e.target.value)}
+                            placeholder="What did you work on?"
+                            className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          />
+                        </label>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="time"
+                            value={startTimeInput}
+                            onChange={(e) => {
+                              setStartTimeInput(e.target.value);
+                              if (endTimeInput) {
+                                setHoursInput(hoursFromStartEnd(e.target.value, endTimeInput));
+                              }
+                            }}
+                            placeholder="Start time"
+                            aria-label="Start time"
+                            className="w-32 rounded-lg border border-slate-200 px-3 py-2.5 text-center text-sm font-mono text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          />
+                          <span className="text-sm text-muted">to</span>
+                          <input
+                            type="time"
+                            value={endTimeInput}
+                            onChange={(e) => {
+                              setEndTimeInput(e.target.value);
+                              if (startTimeInput) {
+                                setHoursInput(hoursFromStartEnd(startTimeInput, e.target.value));
+                              }
+                            }}
+                            placeholder="End time"
+                            aria-label="End time"
+                            className="w-32 rounded-lg border border-slate-200 px-3 py-2.5 text-center text-sm font-mono text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          />
+                          <span className="text-sm text-muted">=</span>
+                          <input
+                            type="text"
+                            value={
+                              hoursInput
+                                ? formatHoursDisplay(Number.parseFloat(hoursInput) || 0, 'hh_mm')
+                                : '0:00'
+                            }
+                            readOnly
+                            aria-label="Duration"
+                            className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-center text-sm font-mono font-semibold text-text"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      // Duration mode: Notes + Hours side-by-side (original Harvest layout).
+                      <div className="grid grid-cols-[1fr_7rem] gap-3">
+                        <label className="block">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+                            Notes <span className="font-normal normal-case text-muted/70">(optional)</span>
+                          </span>
+                          <textarea
+                            rows={3}
+                            value={notesInput}
+                            onChange={(e) => setNotesInput(e.target.value)}
+                            placeholder="What did you work on?"
+                            className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+                            Hours
+                          </span>
+                          <input
+                            type="text"
+                            value={hoursInput}
+                            onChange={(e) => setHoursInput(e.target.value)}
+                            placeholder="0:00"
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-center text-sm font-mono text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          />
+                        </label>
+                      </div>
+                    )}
 
                     {formError ? (
                       <div className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
@@ -2736,7 +2853,7 @@ export default function DashboardPage() {
                         type="button"
                         onClick={handleSave}
                         disabled={saving}
-                        className="btn-primary disabled:opacity-50"
+                        className="btn-primary gap-2 disabled:opacity-50"
                       >
                         {saving ? 'Saving…' : (
                           <>
@@ -2789,10 +2906,10 @@ export default function DashboardPage() {
                   <div className="px-5 py-12 text-center text-sm text-muted">Loading entries…</div>
                 ) : view === 'week' ? (
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse text-base">
+                    <table className="w-full min-w-[820px] border-collapse text-base">
                       <thead>
-                        <tr className="border-b-2 border-slate-200 bg-slate-50/80">
-                          <th className="sticky left-0 z-10 bg-slate-50/80 px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-muted">
+                        <tr className="border-b-2 border-slate-200">
+                          <th className="sticky left-0 z-10 w-[180px] min-w-[180px] max-w-[180px] bg-white px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700 sm:w-[220px] sm:min-w-[220px] sm:max-w-[220px] sm:px-5">
                             Project · Task
                           </th>
                           {weekDays.map((day) => {
@@ -2814,8 +2931,8 @@ export default function DashboardPage() {
                                   title="Open day view"
                                 >
                                   <span
-                                    className={`block text-xs font-bold uppercase tracking-wider ${
-                                      isActive ? 'text-primary' : 'text-muted'
+                                    className={`block text-[11px] font-bold uppercase tracking-[0.08em] ${
+                                      isActive ? 'text-primary' : 'text-slate-700'
                                     }`}
                                   >
                                     {day.label}
@@ -2831,7 +2948,7 @@ export default function DashboardPage() {
                               </th>
                             );
                           })}
-                          <th className="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider text-muted">
+                          <th className="px-3 py-3 text-right text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                             Total
                           </th>
                           <th className="w-8" aria-hidden="true" />
@@ -2867,14 +2984,14 @@ export default function DashboardPage() {
                                 key={`${row.project_id}:${row.project_task_id}`}
                                 className="border-b border-slate-100 last:border-b-0"
                               >
-                                <td className="sticky left-0 z-10 bg-white px-5 py-4">
-                                  <p className="text-base font-bold text-text">
-                                    {row.project_name}{' '}
-                                    <span className="font-medium text-muted">
-                                      ({row.client_name})
-                                    </span>
+                                <td className="sticky left-0 z-10 w-[180px] min-w-[180px] max-w-[180px] bg-white px-4 py-4 sm:w-[220px] sm:min-w-[220px] sm:max-w-[220px] sm:px-5">
+                                  <p className="text-sm font-bold text-text sm:text-base">
+                                    {row.project_name}
                                   </p>
-                                  <p className="mt-1 text-sm text-muted">{row.task_name}</p>
+                                  <p className="text-xs font-medium text-muted">
+                                    ({row.client_name})
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted sm:text-sm">{row.task_name}</p>
                                 </td>
                                 {weekDays.map((day, i) => {
                                   const k = cellKey(row.project_id, row.project_task_id, i);
@@ -2933,8 +3050,8 @@ export default function DashboardPage() {
                         )}
                       </tbody>
                       <tfoot>
-                        <tr className="border-t-2 border-slate-200 bg-slate-50/60">
-                          <td className="sticky left-0 z-10 bg-slate-50/60 px-5 py-3.5 text-xs font-bold uppercase tracking-wider text-muted">
+                        <tr className="border-t-2 border-slate-200 bg-slate-50">
+                          <td className="sticky left-0 z-10 bg-slate-50 px-4 py-3.5 text-xs font-bold uppercase tracking-wider text-muted sm:px-5">
                             Day total
                           </td>
                           {weekDays.map((day) => {
@@ -3166,7 +3283,7 @@ export default function DashboardPage() {
                 <select
                   value={gridAddProjectId}
                   onChange={(e) => onGridAddProjectChange(Number(e.target.value))}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm transition hover:border-slate-300 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  className="input mt-1"
                 >
                   <option value="">Choose a project…</option>
                   {projects.map((p) => (
@@ -3184,7 +3301,7 @@ export default function DashboardPage() {
                   value={gridAddTaskId}
                   onChange={(e) => setGridAddTaskId(Number(e.target.value))}
                   disabled={gridAddProjectId === ''}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm transition disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted hover:border-slate-300 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  className="input mt-1 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted"
                 >
                   <option value="">
                     {gridAddProjectId === '' ? 'Pick a project first…' : 'Choose a task…'}

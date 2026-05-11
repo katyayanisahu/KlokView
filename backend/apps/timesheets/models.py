@@ -95,6 +95,13 @@ class TimeEntry(models.Model):
     is_running = models.BooleanField(default=False)
     started_at = models.DateTimeField(null=True, blank=True)
 
+    # Optional batch this entry belongs to — set when created via CSV import,
+    # null for normal user-created entries. Lets us "Revert an import".
+    import_batch = models.ForeignKey(
+        'ImportBatch', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='time_entries',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -106,6 +113,37 @@ class TimeEntry(models.Model):
             models.Index(fields=['account', 'project', 'date']),
             models.Index(fields=['account', 'jira_issue_key']),
         ]
+
+
+class ImportBatch(models.Model):
+    """Tracks a single bulk-import operation so it can be reverted.
+
+    On revert, all `TimeEntry` rows with this `import_batch_id` are deleted.
+    """
+
+    class Kind(models.TextChoices):
+        TIME_ENTRIES = 'time_entries', 'Time entries'
+
+    account = models.ForeignKey(
+        'accounts.Account', on_delete=models.CASCADE, related_name='import_batches',
+    )
+    kind = models.CharField(max_length=32, choices=Kind.choices, default=Kind.TIME_ENTRIES)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_import_batches',
+    )
+    record_count = models.IntegerField(default=0)
+    source_filename = models.CharField(max_length=255, blank=True, default='')
+    note = models.TextField(blank=True, default='')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'import_batches'
+        ordering = ['-created_at']
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f'{self.kind} import #{self.id} ({self.record_count} rows)'
 
     def __str__(self) -> str:
         return f'{self.user_id} · {self.project_id} · {self.date} · {self.hours}h'

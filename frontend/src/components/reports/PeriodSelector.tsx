@@ -62,8 +62,8 @@ export default function PeriodSelector({
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
-      <h3 className="font-heading text-base font-bold text-text sm:text-lg">{rangeLabel}</h3>
-      <div className="relative ml-auto sm:ml-0" ref={ref}>
+      <h3 className="px-2 font-heading text-base font-bold text-text sm:px-4 sm:text-lg">{rangeLabel}</h3>
+      <div className="relative" ref={ref}>
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -73,7 +73,7 @@ export default function PeriodSelector({
           <ChevronDown className="h-4 w-4 text-muted" />
         </button>
         {open ? (
-          <div className="absolute right-0 z-30 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+          <div className="absolute left-0 z-30 mt-1 w-44 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg sm:left-0">
             {(Object.keys(PERIOD_LABEL) as Period[]).map((key) => (
               <button
                 key={key}

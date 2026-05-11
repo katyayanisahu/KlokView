@@ -95,7 +95,7 @@ export default function RegisterPage() {
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-8 sm:px-6 sm:py-12 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-20">
         <section className="flex flex-col justify-center">
           <div className="mb-8">
-            <span className="brand-mark">trackflow</span>
+            <span className="brand-mark">klokview</span>
           </div>
           <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-primary">
             Track time with your team, the easy way

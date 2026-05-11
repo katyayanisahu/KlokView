@@ -223,10 +223,10 @@ export default function NewProjectPage() {
   };
 
   return (
-    <div className="min-h-screen bg-bg pb-24">
+    <div className="min-h-screen overflow-x-hidden bg-bg pb-24">
       {/* Page header — full-width strip with subtle gradient */}
       <div className="border-b border-slate-200 bg-gradient-to-r from-primary-soft/40 via-white to-white">
-        <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+        <div className="mx-auto max-w-6xl px-5 py-5 sm:px-6 sm:py-6 lg:px-8">
           <Link
             to="/projects"
             className="mb-3 inline-flex items-center gap-1 text-sm text-muted transition hover:text-text"
@@ -260,10 +260,10 @@ export default function NewProjectPage() {
         </div>
       </div>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-        <form onSubmit={handleSubmit} className="grid gap-8 lg:grid-cols-[260px_1fr]">
+      <main className="mx-auto max-w-6xl px-5 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <form onSubmit={handleSubmit} className="grid min-w-0 gap-8 lg:grid-cols-[260px_minmax(0,1fr)]">
           {/* Left rail — sticky step nav + live summary */}
-          <aside className="lg:sticky lg:top-20 lg:self-start">
+          <aside className="min-w-0 lg:sticky lg:top-20 lg:self-start">
             <nav className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
               {STEPS.map((step) => {
                 const done = stepDone[step.id as keyof typeof stepDone];
@@ -292,23 +292,23 @@ export default function NewProjectPage() {
               <p className="text-xs font-semibold uppercase tracking-wider text-primary">
                 Live summary
               </p>
-              <dl className="mt-3 space-y-2.5 text-sm">
-                <div>
-                  <dt className="text-xs text-muted">Client</dt>
-                  <dd className="font-medium text-text">
-                    {selectedClient?.name ?? <span className="text-muted">— not chosen —</span>}
+              <dl className="mt-3 divide-y divide-primary/10 text-sm">
+                <div className="grid grid-cols-[80px_1fr] items-baseline gap-x-3 py-2 first:pt-0 last:pb-0">
+                  <dt className="text-xs font-medium text-muted">Client</dt>
+                  <dd className="min-w-0 truncate font-semibold text-text">
+                    {selectedClient?.name ?? <span className="font-normal text-muted">— not chosen —</span>}
                   </dd>
                 </div>
-                <div>
-                  <dt className="text-xs text-muted">Budget</dt>
-                  <dd className="font-medium text-text">{formatBudgetSummary()}</dd>
+                <div className="grid grid-cols-[80px_1fr] items-baseline gap-x-3 py-2 first:pt-0 last:pb-0">
+                  <dt className="text-xs font-medium text-muted">Budget</dt>
+                  <dd className="min-w-0 font-semibold text-text">{formatBudgetSummary()}</dd>
                 </div>
-                <div>
-                  <dt className="text-xs text-muted">Tasks</dt>
-                  <dd className="font-medium text-text">
+                <div className="grid grid-cols-[80px_1fr] items-baseline gap-x-3 py-2 first:pt-0 last:pb-0">
+                  <dt className="text-xs font-medium text-muted">Tasks</dt>
+                  <dd className="min-w-0 font-semibold text-text">
                     {selectedTaskIds.size} selected
                     {billableCount > 0 ? (
-                      <span className="ml-1 text-xs text-muted">
+                      <span className="ml-1 text-xs font-normal text-muted">
                         ({billableCount} billable)
                       </span>
                     ) : null}
@@ -319,7 +319,7 @@ export default function NewProjectPage() {
           </aside>
 
           {/* Right pane — content sections */}
-          <div className="space-y-6">
+          <div className="min-w-0 space-y-6">
             {/* Basics */}
             <section
               id="basics"
@@ -709,9 +709,9 @@ export default function NewProjectPage() {
                 </div>
               </header>
               <div className="divide-y divide-slate-100">
-                <div className="grid grid-cols-[1fr_120px] gap-4 bg-slate-50/50 px-6 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
+                <div className="grid grid-cols-[1fr_80px] gap-3 bg-slate-50/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted sm:gap-4 sm:px-6">
                   <div>Task</div>
-                  <div className="text-right">Billable</div>
+                  <div className="text-center">Billable</div>
                 </div>
                 {sortedTasks.map((task) => {
                   const isSelected = selectedTaskIds.has(task.id);
@@ -719,25 +719,25 @@ export default function NewProjectPage() {
                   return (
                     <label
                       key={task.id}
-                      className={`grid cursor-pointer grid-cols-[1fr_120px] items-center gap-4 px-6 py-3 text-sm transition hover:bg-slate-50/50 ${
+                      className={`grid cursor-pointer grid-cols-[1fr_80px] items-center gap-3 px-4 py-3 text-sm transition hover:bg-slate-50/50 sm:gap-4 sm:px-6 ${
                         isSelected ? '' : 'opacity-60'
                       }`}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleTask(task.id)}
-                          className="h-4 w-4 accent-primary"
+                          className="h-4 w-4 flex-shrink-0 accent-primary"
                         />
-                        <span className="font-medium text-text">{task.name}</span>
+                        <span className="truncate font-medium text-text">{task.name}</span>
                         {task.is_default ? (
-                          <span className="rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                          <span className="flex-shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
                             Default
                           </span>
                         ) : null}
                       </div>
-                      <div className="flex justify-end">
+                      <div className="flex justify-center">
                         <input
                           type="checkbox"
                           checked={isBillable}
@@ -770,7 +770,7 @@ export default function NewProjectPage() {
 
       {/* Sticky bottom action bar */}
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 shadow-[0_-4px_12px_rgba(0,0,0,0.04)] backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-3 sm:px-6 lg:px-8">
           <p className="text-xs text-muted">
             {stepDone.basics ? (
               <>

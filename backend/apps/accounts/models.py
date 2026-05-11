@@ -5,12 +5,75 @@ from django.db import models
 class Account(models.Model):
     """A tenant / workspace. All data belongs to exactly one Account."""
 
+    class WeekStart(models.TextChoices):
+        MONDAY = 'monday', 'Monday'
+        SUNDAY = 'sunday', 'Sunday'
+
+    class DateFormat(models.TextChoices):
+        DMY_SLASH = 'DD/MM/YYYY', 'DD/MM/YYYY'
+        MDY_SLASH = 'MM/DD/YYYY', 'MM/DD/YYYY'
+        YMD_DASH = 'YYYY-MM-DD', 'YYYY-MM-DD'
+
+    class TimeFormat(models.TextChoices):
+        H12 = '12h', '12-hour clock'
+        H24 = '24h', '24-hour clock'
+
+    class TimeDisplay(models.TextChoices):
+        HMM = 'hh_mm', 'HH:MM'
+        DECIMAL = 'decimal', 'Decimal hours'
+
+    class TimerMode(models.TextChoices):
+        DURATION = 'duration', 'Track time via duration'
+        START_END = 'start_end', 'Track time via start and end time'
+
     name = models.CharField(max_length=150)
     owner = models.ForeignKey(
         'User', on_delete=models.PROTECT, related_name='owned_accounts',
         null=True, blank=True,
     )
     is_active = models.BooleanField(default=True)
+
+    # ---- Preferences ----
+    timezone = models.CharField(max_length=64, default='Asia/Kolkata')
+    fiscal_year_start_month = models.IntegerField(default=1, help_text='1-12, month the fiscal year starts')
+    week_starts_on = models.CharField(
+        max_length=10, choices=WeekStart.choices, default=WeekStart.MONDAY,
+    )
+    default_capacity_hours = models.DecimalField(
+        max_digits=5, decimal_places=2, default=35,
+    )
+    timesheet_deadline = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text='Free-form deadline like "Friday at 5:00pm". Used for reminders later.',
+    )
+    date_format = models.CharField(
+        max_length=12, choices=DateFormat.choices, default=DateFormat.DMY_SLASH,
+    )
+    time_format = models.CharField(
+        max_length=4, choices=TimeFormat.choices, default=TimeFormat.H12,
+    )
+    time_display = models.CharField(
+        max_length=10, choices=TimeDisplay.choices, default=TimeDisplay.HMM,
+    )
+    timer_mode = models.CharField(
+        max_length=12, choices=TimerMode.choices, default=TimerMode.DURATION,
+    )
+    currency = models.CharField(max_length=8, default='INR')
+    number_format = models.CharField(max_length=16, default='1,234.56')
+
+    # ---- Modules (toggles for which features are enabled in this workspace) ----
+    enabled_modules = models.JSONField(
+        default=dict, blank=True,
+        help_text='Per-module on/off flags, e.g. {"timesheet_approval": true, "reports": true}',
+    )
+
+    # ---- Sign-in security (account-level) ----
+    require_two_factor = models.BooleanField(default=False)
+    allow_google_sso = models.BooleanField(default=False)
+    allow_microsoft_sso = models.BooleanField(default=False)
+    session_timeout_minutes = models.IntegerField(default=480)
+    login_alerts = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -81,6 +144,24 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text='Hours per week this person is available to work. Used for utilization reports.',
     )
 
+    timezone = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text='IANA timezone name (e.g. "Asia/Kolkata"). Blank falls back to account timezone.',
+    )
+    home_show_welcome = models.BooleanField(
+        default=True,
+        help_text='Show the dashboard welcome banner for this user.',
+    )
+    notification_prefs = models.JSONField(
+        default=dict, blank=True,
+        help_text=(
+            'Per-user notification preferences. Keys: '
+            'reminder_personal_daily, reminder_team_wide, weekly_email, '
+            'approval_email_people, approval_email_projects, approval_email_approved, '
+            'project_deleted_email, product_updates_email.'
+        ),
+    )
+
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
@@ -108,6 +189,26 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self) -> str:
         return self.email
+
+
+DEFAULT_NOTIFICATION_PREFS = {
+    'reminder_personal_daily': False,
+    'reminder_team_wide': True,
+    'weekly_email': True,
+    'approval_email_people': True,
+    'approval_email_projects': True,
+    'approval_email_approved': False,
+    'project_deleted_email': False,
+    'product_updates_email': True,
+}
+
+
+def merged_notification_prefs(user) -> dict:
+    """Return user's notification prefs merged over the defaults."""
+    prefs = dict(DEFAULT_NOTIFICATION_PREFS)
+    if user.notification_prefs:
+        prefs.update(user.notification_prefs)
+    return prefs
 
 
 class JobRole(models.Model):

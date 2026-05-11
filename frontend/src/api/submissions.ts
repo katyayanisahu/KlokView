@@ -29,6 +29,11 @@ export async function withdrawSubmission(id: number): Promise<{ detail: string }
   return data;
 }
 
+export async function unapproveSubmission(id: number): Promise<Submission> {
+  const { data } = await api.post<Submission>(`/submissions/${id}/unapprove/`);
+  return data;
+}
+
 export async function approveSubmission(
   id: number,
   payload?: SubmissionDecisionPayload,

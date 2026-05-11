@@ -1,0 +1,11 @@
+date,project,task,person,hours,notes,billable
+2026-05-04,NSD,Marketing,katyayanisahu123@gmail.com,2,Sprint planning,yes
+2026-05-04,NSD,Programming,Yogesh Yadav,4,API endpoint refactor,yes
+2026-05-04,Bergen Debate Club,Sample,Carol Chen,1.5,Design review,yes
+2026-05-05,NSD,Marketing,Jane Smith,3,Customer onboarding,yes
+2026-05-05,Debate drills,Sample 2,Bob Lee,2.5,QA test pass,no
+2026-05-05,NSD,Programming,Yogesh Yadav,2,Code review,yes
+2026-05-06,Bergen Debate Club,Marketing,Carol Chen,1,Architecture discussion,yes
+2026-05-06,NSD,Programming,Bob Lee,3.5,CI pipeline fixes,yes
+2026-05-06,Debate drills,Marketing,Jane Smith,2,Customer call,yes
+2026-05-07,NSD,Programming,katyayanisahu123@gmail.com,5,Trackflow Jira integration,yes

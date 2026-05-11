@@ -99,17 +99,17 @@ export default function ManageRolesPage() {
               }}
               className="btn-primary"
             >
-              <Plus className="mr-1.5 h-4 w-4" />
+              <Plus className="h-4 w-4" />
               New role
             </button>
           ) : null}
-          <div className="relative ml-auto">
+          <div className="relative w-full sm:ml-auto sm:w-auto">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search roles…"
-              className="input w-64 pl-9"
+              className="input w-full pl-9 sm:w-64"
             />
           </div>
           <span className="text-xs text-muted">

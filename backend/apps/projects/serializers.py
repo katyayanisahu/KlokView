@@ -36,7 +36,7 @@ class TaskSerializer(serializers.ModelSerializer):
 
 class ProjectTaskSerializer(serializers.ModelSerializer):
     task_id = serializers.PrimaryKeyRelatedField(
-        queryset=Task.objects.filter(is_active=True), source='task', write_only=True
+        queryset=Task.objects.filter(is_active=True), source='task'
     )
     task_name = serializers.CharField(source='task.name', read_only=True)
     hours_logged = serializers.SerializerMethodField()

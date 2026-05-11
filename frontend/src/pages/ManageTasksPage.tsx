@@ -1,4 +1,16 @@
-import { ChevronDown, Download, Edit3, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import {
+  Archive,
+  CheckSquare,
+  ChevronDown,
+  Download,
+  Edit3,
+  ListTodo,
+  Plus,
+  RotateCcw,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import ManageSubnav from '@/components/ManageSubnav';
@@ -246,7 +258,7 @@ export default function ManageTasksPage() {
                 <span className="ml-1 rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-semibold text-primary">
                   {selectedIds.size}
                 </span>
-                <ChevronDown className="h-3 w-3" />
+                <ChevronDown className="h-4 w-4 text-muted" />
               </button>
               {bulkOpen ? (
                 <>
@@ -297,7 +309,7 @@ export default function ManageTasksPage() {
                   }}
                   className="btn-primary"
                 >
-                  <Plus className="mr-1.5 h-4 w-4" />
+                  <Plus className="h-4 w-4" />
                   New task
                 </button>
               ) : null}
@@ -309,7 +321,7 @@ export default function ManageTasksPage() {
                 >
                   <Download className="h-4 w-4" />
                   Export
-                  <ChevronDown className="h-3 w-3" />
+                  <ChevronDown className="h-4 w-4 text-muted" />
                 </button>
                 {exportOpen ? (
                   <>
@@ -338,16 +350,8 @@ export default function ManageTasksPage() {
                 ) : null}
               </div>
             </div>
-            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                className="input"
-              >
-                <option value="active">Active</option>
-                <option value="archived">Archived</option>
-              </select>
-              <div className="relative w-full sm:w-64">
+            <div className="flex w-full flex-nowrap items-center gap-2 sm:w-auto">
+              <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
                 <input
                   value={search}
@@ -356,6 +360,14 @@ export default function ManageTasksPage() {
                   className="input w-full pl-9"
                 />
               </div>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                className="input w-auto shrink-0"
+              >
+                <option value="active">Active</option>
+                <option value="archived">Archived</option>
+              </select>
             </div>
           </div>
         )}
@@ -379,6 +391,7 @@ export default function ManageTasksPage() {
             <TaskGroup
               title="Common tasks"
               hint="These tasks are automatically added to all new projects."
+              tone="primary"
               tasks={common}
               canEdit={canEdit}
               selectedIds={selectedIds}
@@ -399,6 +412,7 @@ export default function ManageTasksPage() {
             <TaskGroup
               title="Other tasks"
               hint="These tasks must be manually added to projects."
+              tone="accent"
               tasks={other}
               canEdit={canEdit}
               selectedIds={selectedIds}
@@ -491,6 +505,7 @@ function GroupCheckbox({
 function TaskGroup({
   title,
   hint,
+  tone,
   tasks,
   canEdit,
   selectedIds,
@@ -507,6 +522,7 @@ function TaskGroup({
 }: {
   title: string;
   hint: string;
+  tone: 'primary' | 'accent';
   tasks: Task[];
   canEdit: boolean;
   selectedIds: Set<number>;
@@ -525,20 +541,32 @@ function TaskGroup({
   const selectedCount = ids.filter((id) => selectedIds.has(id)).length;
   const groupState: 'none' | 'some' | 'all' =
     selectedCount === 0 ? 'none' : selectedCount === ids.length ? 'all' : 'some';
+  const Icon = tone === 'primary' ? CheckSquare : ListTodo;
+  const iconBg = 'bg-primary text-white';
+  const dotColor = 'bg-primary';
+  const headerBg = 'bg-primary-soft';
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-md">
-      <div className="grid grid-cols-[24px_1fr_120px] items-center gap-4 rounded-t-xl border-b border-slate-200 bg-slate-50 px-6 py-3">
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md">
+      <div className={`grid grid-cols-[24px_auto_1fr_auto] items-center gap-3 border-b border-slate-200 px-4 py-4 sm:gap-4 sm:px-6 ${headerBg}`}>
         <div className="flex items-center">
           {canEdit ? (
             <GroupCheckbox state={groupState} onChange={onToggleGroup} disabled={tasks.length === 0} />
           ) : null}
         </div>
+        <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${iconBg}`}>
+          <Icon className="h-5 w-5" />
+        </div>
         <div>
-          <p className="text-sm font-semibold text-text">{title}</p>
+          <p className="font-heading text-base font-bold text-text">{title}</p>
           <p className="text-xs text-muted">{hint}</p>
         </div>
-        <div />
+        <div className="flex items-center justify-end">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-text shadow-sm ring-1 ring-slate-200">
+            <span className="tabular-nums">{tasks.length}</span>
+            <span className="text-muted">{tasks.length === 1 ? 'task' : 'tasks'}</span>
+          </span>
+        </div>
       </div>
       {tasks.length === 0 ? (
         <div className="px-6 py-8 text-center text-sm text-muted">
@@ -550,8 +578,8 @@ function TaskGroup({
           return (
             <div
               key={t.id}
-              className={`grid grid-cols-[24px_1fr_120px] items-center gap-4 border-b border-slate-100 px-6 py-3 text-sm last:border-b-0 transition ${
-                checked ? 'bg-warning/10' : 'hover:bg-slate-50'
+              className={`grid grid-cols-[24px_1fr_auto] items-center gap-3 border-b border-slate-100 px-4 py-3.5 text-sm last:border-b-0 transition sm:gap-4 sm:px-6 ${
+                checked ? 'bg-warning/10' : 'hover:bg-slate-50/70'
               }`}
             >
               <div className="flex items-center">
@@ -565,7 +593,8 @@ function TaskGroup({
                   />
                 ) : null}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotColor} ${t.is_active ? '' : 'opacity-40'}`} aria-hidden="true" />
                 <span
                   className={`font-semibold ${t.is_active ? 'text-text' : 'text-muted'}`}
                 >
@@ -605,7 +634,7 @@ function TaskGroup({
                       className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs font-medium text-text transition hover:bg-slate-100"
                     >
                       Actions
-                      <ChevronDown className="h-3 w-3" />
+                      <ChevronDown className="h-4 w-4 text-muted" />
                     </button>
                     {openMenuId === t.id ? (
                       <>
@@ -632,7 +661,7 @@ function TaskGroup({
                                 onClick={() => onArchive(t)}
                                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-warning transition hover:bg-warning/10"
                               >
-                                Archive
+                                <Archive className="h-4 w-4" /> Archive
                               </button>
                             </>
                           ) : (
@@ -641,7 +670,7 @@ function TaskGroup({
                               onClick={() => onRestore(t)}
                               className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-bg"
                             >
-                              Restore
+                              <RotateCcw className="h-4 w-4" /> Restore
                             </button>
                           )}
                           <button

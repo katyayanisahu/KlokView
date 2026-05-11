@@ -1,15 +1,63 @@
 from decimal import Decimal
 
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
 from django.db.models import DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.accounts.models import merged_notification_prefs
 from apps.accounts.permissions import IsOwnerOrAdminForWrite
 from apps.accounts.tenant import TenantScopedMixin
 
 from .models import Project, ProjectMembership, ProjectTask, Task
+
+User = get_user_model()
+
+
+def _notify_project_deleted(project: Project, deleter) -> None:
+    """Email project managers + workspace owners/admins when project is hard-deleted."""
+    manager_ids = set(
+        ProjectMembership.objects.filter(
+            project_id=project.id, is_project_manager=True,
+        ).values_list('user_id', flat=True)
+    )
+    recipients = (
+        User.objects.filter(account_id=project.account_id, is_active=True)
+        .filter(Q(role__in=['owner', 'admin']) | Q(id__in=manager_ids))
+        .exclude(id=getattr(deleter, 'id', None))
+        .distinct()
+    )
+
+    emails = []
+    for user in recipients:
+        prefs = merged_notification_prefs(user)
+        if prefs.get('project_deleted_email'):
+            emails.append(user.email)
+    if not emails:
+        return
+
+    deleter_name = (
+        (deleter.full_name or deleter.email) if deleter else 'A workspace admin'
+    )
+    subject = f'[TrackFlow] Project "{project.name}" was deleted'
+    body = (
+        f"Hi,\n\n"
+        f"{deleter_name} deleted the project \"{project.name}\".\n\n"
+        f"All time entries, tasks, and memberships associated with this project "
+        f"have been removed.\n\n"
+        f"— TrackFlow"
+    )
+    send_mail(
+        subject=subject,
+        message=body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=emails,
+        fail_silently=not settings.DEBUG,
+    )
 from .serializers import (
     ProjectCreateSerializer,
     ProjectDetailSerializer,
@@ -109,6 +157,11 @@ class ProjectViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         hard = request.query_params.get('hard', '').lower() in ('true', '1', 'yes')
         if hard:
             name = project.name
+            # Notify before delete — cascade wipes memberships needed for recipient query.
+            try:
+                _notify_project_deleted(project, request.user)
+            except Exception:
+                pass
             project.delete()
             return Response({'detail': f'"{name}" deleted.'}, status=status.HTTP_200_OK)
         project.is_active = False

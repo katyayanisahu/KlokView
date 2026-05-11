@@ -88,7 +88,7 @@ export default function AcceptInvitePage() {
     <div className="flex min-h-full items-center justify-center bg-gradient-to-b from-bg to-primary-soft/30 px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <span className="brand-mark">trackflow</span>
+          <span className="brand-mark">klokview</span>
         </div>
 
         <div className="card">
@@ -113,7 +113,7 @@ export default function AcceptInvitePage() {
                   Hi {invite.firstName}!
                 </h1>
                 <p className="mt-1 text-sm text-muted">
-                  You&apos;ve been invited to join <strong>{invite.accountName}</strong> on TrackFlow. Set your
+                  You&apos;ve been invited to join <strong>{invite.accountName}</strong> on KlokView. Set your
                   password to get started.
                 </p>
               </div>
@@ -164,7 +164,7 @@ export default function AcceptInvitePage() {
                 )}
 
                 <button type="submit" className="btn-primary w-full" disabled={isSubmitting}>
-                  {isSubmitting ? 'Setting up…' : 'Set password & join TrackFlow'}
+                  {isSubmitting ? 'Setting up…' : 'Set password & join KlokView'}
                 </button>
               </form>
             </>

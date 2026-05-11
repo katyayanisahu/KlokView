@@ -85,7 +85,7 @@ export default function ContactModal({ client, contact, onClose, onSaved }: Prop
           <p className="mb-5 text-sm text-muted">
             No email is sent when adding a contact. The email address is captured for your own
             reference and for the convenience of sending invoices to the client directly from
-            TrackFlow.
+            KlokView.
           </p>
 
           <div className="grid grid-cols-[140px_1fr] gap-x-6 gap-y-4">

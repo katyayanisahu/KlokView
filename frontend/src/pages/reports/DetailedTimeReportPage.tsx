@@ -1,4 +1,4 @@
-import { ChevronDown, Download, Save } from 'lucide-react';
+import { ChevronDown, Clock, Download, Filter, Save, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
@@ -6,6 +6,7 @@ import PeriodSelector, { type Period } from '@/components/reports/PeriodSelector
 import { computeRange, formatRangeLabel, nudgeAnchor } from '@/components/reports/dateRange';
 import { downloadCsv, timestampedFilename } from '@/components/reports/csvExport';
 import { formatHours } from '@/components/reports/reportFormat';
+import { useFiscalYearStartMonth, useWeekStart } from '@/utils/preferences';
 import { listClients } from '@/api/clients';
 import { listProjects, listTasks } from '@/api/projects';
 import { listTeam } from '@/api/users';
@@ -74,6 +75,8 @@ function toIso(d: Date): string {
 
 export default function DetailedTimeReportPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const weekStartsOn = useWeekStart();
+  const fiscalStartMonth = useFiscalYearStartMonth();
 
   const hasExplicitDates = !!(searchParams.get('start_date') || searchParams.get('end_date'));
   const [period, setPeriod] = useState<Period>(
@@ -112,10 +115,10 @@ export default function DetailedTimeReportPage() {
       setEndDate('');
       return;
     }
-    const r = computeRange(period, anchor);
+    const r = computeRange(period, anchor, weekStartsOn, fiscalStartMonth);
     setStartDate(r.start);
     setEndDate(r.end);
-  }, [period, anchor]);
+  }, [period, anchor, weekStartsOn, fiscalStartMonth]);
 
   const canNudge = !['all_time', 'custom'].includes(period);
   const handlePrev = canNudge ? () => setAnchor((a) => nudgeAnchor(a, period, -1)) : undefined;
@@ -231,25 +234,65 @@ export default function DetailedTimeReportPage() {
   const { confirmDialog, ask } = useConfirm();
   const [actionsOpen, setActionsOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [actionFlash, setActionFlash] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+
+  const showActionFlash = (tone: 'success' | 'error', message: string) => {
+    setActionFlash({ tone, message });
+    setTimeout(() => setActionFlash(null), 5000);
+  };
+
+  // Pull a human-readable reason out of an axios error.
+  const errorMessage = (err: unknown): string => {
+    const detail = (err as { response?: { data?: unknown } } | undefined)?.response?.data;
+    if (typeof detail === 'string') return detail;
+    if (detail && typeof detail === 'object') {
+      const d = detail as Record<string, unknown>;
+      if (typeof d.detail === 'string') return d.detail;
+      const first = Object.values(d)[0];
+      if (typeof first === 'string') return first;
+      if (Array.isArray(first) && typeof first[0] === 'string') return first[0];
+    }
+    return (err as { message?: string } | undefined)?.message ?? 'Unknown error';
+  };
 
   const applyBillable = async (markBillable: boolean) => {
     setActionsOpen(false);
     if (selected.size === 0) return;
     setActionBusy(true);
-    try {
-      const ids = Array.from(selected);
-      await Promise.all(
-        ids.map((id) => updateTimeEntry(id, { is_billable: markBillable })),
-      );
+    setActionFlash(null);
+    const ids = Array.from(selected);
+    const results = await Promise.allSettled(
+      ids.map((id) => updateTimeEntry(id, { is_billable: markBillable })),
+    );
+    const succeeded = new Set<number>();
+    const failures: { id: number; reason: string }[] = [];
+    results.forEach((r, idx) => {
+      if (r.status === 'fulfilled') succeeded.add(ids[idx]);
+      else failures.push({ id: ids[idx], reason: errorMessage(r.reason) });
+    });
+    if (succeeded.size > 0) {
       setRows((prev) =>
-        prev.map((r) => (selected.has(r.id) ? { ...r, isBillable: markBillable } : r)),
+        prev.map((r) => (succeeded.has(r.id) ? { ...r, isBillable: markBillable } : r)),
       );
-      setSelected(new Set());
-    } catch {
-      window.alert('Some entries could not be updated.');
-    } finally {
-      setActionBusy(false);
     }
+    setSelected(new Set(failures.map((f) => f.id)));
+    if (failures.length === 0) {
+      showActionFlash(
+        'success',
+        `Marked ${succeeded.size} ${succeeded.size === 1 ? 'entry' : 'entries'} ${markBillable ? 'billable' : 'non-billable'}.`,
+      );
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn('Bulk billable update failures', failures);
+      const reason = failures[0].reason;
+      showActionFlash(
+        'error',
+        succeeded.size > 0
+          ? `Updated ${succeeded.size}, ${failures.length} failed: ${reason}`
+          : `Could not update ${failures.length} ${failures.length === 1 ? 'entry' : 'entries'}: ${reason}`,
+      );
+    }
+    setActionBusy(false);
   };
 
   const handleBulkDelete = async () => {
@@ -263,16 +306,36 @@ export default function DetailedTimeReportPage() {
     });
     if (!ok) return;
     setActionBusy(true);
-    try {
-      const ids = Array.from(selected);
-      await Promise.all(ids.map((id) => deleteTimeEntry(id)));
-      setRows((prev) => prev.filter((r) => !selected.has(r.id)));
-      setSelected(new Set());
-    } catch {
-      window.alert('Some entries could not be deleted.');
-    } finally {
-      setActionBusy(false);
+    setActionFlash(null);
+    const ids = Array.from(selected);
+    const results = await Promise.allSettled(ids.map((id) => deleteTimeEntry(id)));
+    const deleted = new Set<number>();
+    const failures: { id: number; reason: string }[] = [];
+    results.forEach((r, idx) => {
+      if (r.status === 'fulfilled') deleted.add(ids[idx]);
+      else failures.push({ id: ids[idx], reason: errorMessage(r.reason) });
+    });
+    if (deleted.size > 0) {
+      setRows((prev) => prev.filter((r) => !deleted.has(r.id)));
     }
+    setSelected(new Set(failures.map((f) => f.id)));
+    if (failures.length === 0) {
+      showActionFlash(
+        'success',
+        `Deleted ${deleted.size} ${deleted.size === 1 ? 'entry' : 'entries'}.`,
+      );
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn('Bulk delete failures', failures);
+      const reason = failures[0].reason;
+      showActionFlash(
+        'error',
+        deleted.size > 0
+          ? `Deleted ${deleted.size}, ${failures.length} failed: ${reason}`
+          : `Could not delete ${failures.length} ${failures.length === 1 ? 'entry' : 'entries'}: ${reason}`,
+      );
+    }
+    setActionBusy(false);
   };
 
   const handleExportCsv = () => {
@@ -330,10 +393,22 @@ export default function DetailedTimeReportPage() {
   return (
     <div className="space-y-5">
       {confirmDialog}
-      {/* SECTION 1 — Controls Bar */}
-      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">Detailed time report</h2>
+      {/* SECTION 1 — Header card: title + date nav + save action */}
+      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3 pt-5 sm:px-6">
+          <div className="flex items-start gap-3">
+            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+              <Clock className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">
+                Detailed time report
+              </h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Drill into every entry — filter, group, edit, and export.
+              </p>
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => setSaveModalOpen(true)}
@@ -344,11 +419,11 @@ export default function DetailedTimeReportPage() {
           </button>
         </div>
         {saveFlash ? (
-          <p className="mt-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent-dark">
+          <p className="mx-4 mb-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent-dark sm:mx-6">
             {saveFlash}
           </p>
         ) : null}
-        <div className="mt-3">
+        <div className="rounded-b-xl border-t border-slate-100 bg-slate-50/50 px-4 py-3 sm:px-6">
           <PeriodSelector
             period={period}
             onPeriodChange={(next) => {
@@ -369,9 +444,18 @@ export default function DetailedTimeReportPage() {
       </section>
 
       {/* SECTION 2 — Filter panel */}
-      <section className="rounded-xl border border-slate-200 bg-warning/5 p-4 shadow-sm sm:p-5">
-        <h3 className="font-heading text-sm font-bold text-text">Filters</h3>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-3 sm:px-6">
+          <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+            <SlidersHorizontal className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-heading text-sm font-bold text-text">Filters</h3>
+            <p className="text-[11px] text-muted">Narrow down which entries appear in the report.</p>
+          </div>
+        </div>
+        <div className="p-4 sm:p-6">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <FilterField label="Start date">
             <input
               type="date"
@@ -386,16 +470,6 @@ export default function DetailedTimeReportPage() {
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               className="input"
-            />
-          </FilterField>
-          <FilterField label="Search">
-            <input
-              type="search"
-              placeholder="Notes, project, client…"
-              className="input"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') runReport();
-              }}
             />
           </FilterField>
           <FilterField label="Clients">
@@ -468,13 +542,14 @@ export default function DetailedTimeReportPage() {
             </label>
           </FilterField>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
           <button
             type="button"
             onClick={runReport}
             disabled={loading}
             className="btn-primary px-4 py-2 text-sm disabled:opacity-60"
           >
+            <Filter className="h-4 w-4" />
             {loading ? 'Running…' : 'Run report'}
           </button>
           <button type="button" onClick={clearFilters} className="btn-outline px-4 py-2 text-sm">
@@ -484,25 +559,51 @@ export default function DetailedTimeReportPage() {
             <span className="text-xs text-danger">{loadError}</span>
           ) : null}
         </div>
+        </div>
       </section>
 
       {/* SECTION 3 — Results table */}
       {hasRun ? (
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
-            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted">Total hours</p>
-                <p className="font-heading text-2xl font-bold text-text">{formatHours(totalHours)}</p>
-                <p className="text-xs text-muted">
-                  {formatHours(billableHours)} billable hours
-                </p>
+          <div className="border-b border-slate-200 bg-gradient-to-r from-primary-soft/40 to-white px-4 py-4 sm:px-6 sm:py-5">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <div className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary text-white shadow-sm">
+                <Clock className="h-6 w-6" />
               </div>
-              <div className="hidden text-xs text-muted sm:block">
-                <p>{visibleRows.length} entries</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600">
+                  Total hours
+                </p>
+                <div className="flex flex-wrap items-baseline gap-x-3">
+                  <p className="font-heading text-3xl font-bold tabular-nums text-text">
+                    {formatHours(totalHours)}
+                  </p>
+                  <p className="text-xs text-muted">
+                    <span className="font-semibold text-accent-dark">
+                      {formatHours(billableHours)}
+                    </span>{' '}
+                    billable
+                  </p>
+                </div>
+              </div>
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-text shadow-sm ring-1 ring-slate-200">
+                <span className="tabular-nums">{visibleRows.length}</span>
+                <span className="text-muted">{visibleRows.length === 1 ? 'entry' : 'entries'}</span>
               </div>
             </div>
           </div>
+
+          {actionFlash ? (
+            <div
+              className={`border-b px-4 py-2 text-xs sm:px-5 ${
+                actionFlash.tone === 'success'
+                  ? 'border-accent-soft bg-accent-soft text-accent-dark'
+                  : 'border-danger/30 bg-danger/10 text-danger'
+              }`}
+            >
+              {actionFlash.message}
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
             <div className="flex flex-wrap items-center gap-2">
@@ -526,7 +627,7 @@ export default function DetailedTimeReportPage() {
                   className="btn-outline gap-1 px-3 py-1.5 text-xs disabled:opacity-50"
                 >
                   {actionBusy ? 'Working…' : `Actions (${selected.size})`}
-                  <ChevronDown className="h-3.5 w-3.5" />
+                  <ChevronDown className="h-4 w-4 text-muted" />
                 </button>
                 {actionsOpen ? (
                   <>
@@ -576,7 +677,7 @@ export default function DetailedTimeReportPage() {
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+                <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                   <th className="px-4 py-3 sm:px-5">
                     <input
                       type="checkbox"

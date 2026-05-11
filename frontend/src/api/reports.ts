@@ -82,6 +82,28 @@ export interface TaskBreakdownRow {
   members: TaskBreakdownMember[];
 }
 
+export interface TeamBreakdownTask {
+  task_id: number;
+  name: string;
+  hours: string;
+  billable_hours: string;
+  billable_percent: number;
+  billable_amount: string;
+  cost: string;
+}
+
+export interface TeamBreakdownRow {
+  id: number;
+  name: string;
+  initials: string;
+  hours: string;
+  billable_hours: string;
+  billable_percent: number;
+  billable_amount: string;
+  cost: string;
+  tasks: TeamBreakdownTask[];
+}
+
 export interface TimeReport {
   window: { start: string; end: string };
   totals: {
@@ -96,6 +118,7 @@ export interface TimeReport {
   team: TimeReportRow[];
   tasks: TimeReportRow[];
   task_breakdown?: TaskBreakdownRow[];
+  team_breakdown?: TeamBreakdownRow[];
 }
 
 export async function getTimeReport(params?: {
@@ -119,10 +142,14 @@ export interface ActivityEvent {
   time_label: string;
   activity: string;
   hours?: string;
+  entry_date?: string | null;
+  entry_date_label?: string;
   client: string;
   project: string;
+  project_id?: number | null;
   task: string;
   performed_by: string;
+  performer_id?: number | null;
 }
 
 export interface ActivityLogReport {

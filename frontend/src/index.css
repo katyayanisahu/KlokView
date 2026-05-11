@@ -17,17 +17,30 @@
   h4 {
     @apply font-heading;
   }
+  /* Default vertical breathing room for table headers so every table in the app
+     reads consistently. Tailwind utility classes (py-*) on a specific <th>
+     still override this — that's intentional for compact / dense tables. */
+  thead th {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
 }
 
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-text shadow-sm transition hover:bg-accent-dark focus:outline-none focus:ring-2 focus:ring-accent/40 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-text shadow-sm transition hover:bg-accent-dark focus:outline-none focus:ring-2 focus:ring-accent/40 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60;
   }
   .btn-outline {
     @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-text shadow-sm transition hover:border-primary/40 hover:bg-primary-soft/30 focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60;
   }
   .input {
     @apply w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-text placeholder:text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20;
+  }
+  select.input {
+    @apply appearance-none bg-no-repeat pr-10;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B778C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-position: right 0.75rem center;
+    background-size: 1rem;
   }
   .label {
     @apply mb-1.5 block text-sm font-medium text-text;

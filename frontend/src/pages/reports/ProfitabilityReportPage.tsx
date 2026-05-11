@@ -1,13 +1,15 @@
-import { AlertTriangle, ChevronRight, Download, Save } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Download, Save, TrendingUp } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import KpiCard from '@/components/reports/KpiCard';
 import PeriodSelector, { type Period } from '@/components/reports/PeriodSelector';
 import { computeRange, formatRangeLabel, nudgeAnchor } from '@/components/reports/dateRange';
+import { useFiscalYearStartMonth, useWeekStart } from '@/utils/preferences';
 import { downloadCsv, timestampedFilename } from '@/components/reports/csvExport';
 import SaveReportModal from '@/components/reports/SaveReportModal';
 import { formatMoney } from '@/components/reports/reportFormat';
 import { listTeam } from '@/api/users';
+import { useAccountSettingsStore } from '@/store/accountSettingsStore';
 import type { TeamMember } from '@/types';
 import {
   createSavedReport,
@@ -72,6 +74,12 @@ const PROJECT_TYPE_OPTIONS: { value: ProjectTypeFilter; label: string }[] = [
 ];
 
 export default function ProfitabilityReportPage() {
+  // Subscribe to currency + number_format so the page re-renders when the user
+  // changes them in Settings → Preferences. The values themselves are read by
+  // formatMoney() from the same store; we only need the subscription here.
+  useAccountSettingsStore((s) => s.settings?.currency);
+  useAccountSettingsStore((s) => s.settings?.number_format);
+
   const [period, setPeriod] = useState<Period>('quarter');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [subView, setSubView] = useState<SubView>('clients');
@@ -104,7 +112,12 @@ export default function ProfitabilityReportPage() {
     };
   }, []);
 
-  const range = useMemo(() => computeRange(period, anchor), [period, anchor]);
+  const weekStartsOn = useWeekStart();
+  const fiscalStartMonth = useFiscalYearStartMonth();
+  const range = useMemo(
+    () => computeRange(period, anchor, weekStartsOn, fiscalStartMonth),
+    [period, anchor, weekStartsOn, fiscalStartMonth],
+  );
   const isAllTime = period === 'all_time';
 
   useEffect(() => {
@@ -318,14 +331,26 @@ export default function ProfitabilityReportPage() {
 
   return (
     <div className="space-y-5">
-      {/* SECTION 1 — Controls Bar */}
-      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">Profitability report</h2>
-            <span className="rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-primary">
-              Administrators only
-            </span>
+      {/* SECTION 1 — Header card: title + date nav + save action */}
+      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3 pt-5 sm:px-6">
+          <div className="flex items-start gap-3">
+            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+              <TrendingUp className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">
+                  Profitability report
+                </h2>
+                <span className="rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-primary">
+                  Administrators only
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-muted">
+                Revenue, cost, and margin per client, project, and team.
+              </p>
+            </div>
           </div>
           <button
             type="button"
@@ -337,11 +362,11 @@ export default function ProfitabilityReportPage() {
           </button>
         </div>
         {saveFlash ? (
-          <p className="mt-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent-dark">
+          <p className="mx-4 mb-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent-dark sm:mx-6">
             {saveFlash}
           </p>
         ) : null}
-        <div className="mt-3">
+        <div className="rounded-b-xl border-t border-slate-100 bg-slate-50/50 px-4 py-3 sm:px-6">
           <PeriodSelector
             period={period}
             onPeriodChange={(next) => {
@@ -354,16 +379,17 @@ export default function ProfitabilityReportPage() {
           />
         </div>
 
+        <div className="px-4 pb-4 pt-4 sm:px-6">
         {/* Warning banner — surfaces missing rates that would otherwise zero out the math */}
         {loading ? (
-          <div className="mt-4 rounded-lg bg-bg/40 px-3 py-2 text-xs text-muted">Loading…</div>
+          <div className="rounded-lg bg-bg/40 px-3 py-2 text-xs text-muted">Loading…</div>
         ) : loadError ? (
-          <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+          <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
             <p className="text-text/80">{loadError}</p>
           </div>
         ) : (
-          <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+          <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
             <p className="text-text/80">
               Some of the data in this timeframe cannot be accurately calculated because there are missing dates and rates.{' '}
@@ -379,7 +405,7 @@ export default function ProfitabilityReportPage() {
           <select
             value={projectStatus}
             onChange={(e) => setProjectStatus(e.target.value as ProjectStatusFilter)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-text transition hover:bg-slate-50"
+            className="input w-auto py-2 hover:bg-slate-50"
           >
             {PROJECT_STATUS_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -390,7 +416,7 @@ export default function ProfitabilityReportPage() {
           <select
             value={projectType}
             onChange={(e) => setProjectType(e.target.value as ProjectTypeFilter)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-text transition hover:bg-slate-50"
+            className="input w-auto py-2 hover:bg-slate-50"
           >
             {PROJECT_TYPE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -401,7 +427,7 @@ export default function ProfitabilityReportPage() {
           <select
             value={projectManagerId}
             onChange={(e) => setProjectManagerId(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-text transition hover:bg-slate-50"
+            className="input w-auto py-2 hover:bg-slate-50"
           >
             <option value="">All managers</option>
             {team.map((m) => (
@@ -423,6 +449,7 @@ export default function ProfitabilityReportPage() {
               Clear
             </button>
           ) : null}
+        </div>
         </div>
       </section>
 
@@ -727,7 +754,7 @@ function ProfitabilityTable({
   return (
     <table className="min-w-full text-sm">
       <thead>
-        <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+        <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
           <th className="px-4 py-3 sm:px-5">Name</th>
           {showSecondaryColumn ? <th className="hidden px-4 py-3 md:table-cell">Client</th> : null}
           <th className="px-4 py-3 text-right">Revenue</th>

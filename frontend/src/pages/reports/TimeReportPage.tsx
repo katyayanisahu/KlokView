@@ -1,4 +1,4 @@
-import { ChevronRight, Download, Printer, Save } from 'lucide-react';
+import { BarChart3, ChevronRight, Download, Printer, Save } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -10,6 +10,7 @@ import {
   formatRangeLabel as formatRange,
   nudgeAnchor,
 } from '@/components/reports/dateRange';
+import { useFiscalYearStartMonth, useWeekStart } from '@/utils/preferences';
 import { downloadCsv, timestampedFilename } from '@/components/reports/csvExport';
 import SaveReportModal from '@/components/reports/SaveReportModal';
 import {
@@ -138,7 +139,12 @@ export default function TimeReportPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const range = useMemo(() => computeRange(period, anchor), [period, anchor]);
+  const weekStartsOn = useWeekStart();
+  const fiscalStartMonth = useFiscalYearStartMonth();
+  const range = useMemo(
+    () => computeRange(period, anchor, weekStartsOn, fiscalStartMonth),
+    [period, anchor, weekStartsOn, fiscalStartMonth],
+  );
   const isAllTime = period === 'all_time';
 
   useEffect(() => {
@@ -501,10 +507,20 @@ export default function TimeReportPage() {
 
   return (
     <div className="space-y-5">
-      {/* SECTION 1 — Controls Bar */}
-      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">Time report</h2>
+      {/* SECTION 1 — Header card: title + date nav + save action */}
+      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3 pt-5 sm:px-6">
+          <div className="flex items-start gap-3">
+            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+              <BarChart3 className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">Time report</h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Hours grouped by client, project, task, and team.
+              </p>
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => setSaveModalOpen(true)}
@@ -514,7 +530,7 @@ export default function TimeReportPage() {
             Save report
           </button>
         </div>
-        <div className="mt-3">
+        <div className="rounded-b-xl border-t border-slate-100 bg-slate-50/50 px-4 py-3 sm:px-6">
           <PeriodSelector
             period={period}
             onPeriodChange={(next) => {
@@ -527,13 +543,13 @@ export default function TimeReportPage() {
           />
         </div>
         {saveFlash ? (
-          <p className="mt-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent-dark">
+          <p className="mx-4 mb-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent-dark sm:mx-6">
             {saveFlash}
           </p>
         ) : loading ? (
-          <p className="mt-3 text-xs text-muted">Loading…</p>
+          <p className="mx-4 mb-3 text-xs text-muted sm:mx-6">Loading…</p>
         ) : loadError ? (
-          <p className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-text/80">
+          <p className="mx-4 mb-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-text/80 sm:mx-6">
             {loadError}
           </p>
         ) : null}
@@ -604,7 +620,7 @@ export default function TimeReportPage() {
         if (!activeTotals) return null;
         return (
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <div className="grid gap-5 sm:grid-cols-3 sm:items-stretch">
+            <div className="grid gap-4 sm:gap-5 md:grid-cols-3 md:items-stretch">
               <div className="rounded-lg bg-bg p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted">Total hours</p>
                 <p className="mt-2 font-heading text-3xl font-bold text-text">
@@ -833,7 +849,7 @@ function ClientsTable({
   return (
     <table className="min-w-full text-sm">
       <thead>
-        <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+        <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>
@@ -906,7 +922,7 @@ function ProjectsTable({
   return (
     <table className="min-w-full text-sm">
       <thead>
-        <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+        <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>
@@ -976,7 +992,7 @@ function TasksTable({ rows, hoursLink }: { rows: TaskView[]; hoursLink: HoursLin
   return (
     <table className="min-w-full text-sm">
       <thead>
-        <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+        <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>
@@ -1038,7 +1054,7 @@ function TeamTable({ rows, hoursLink }: { rows: TeamView[]; hoursLink: HoursLink
   return (
     <table className="min-w-full text-sm">
       <thead>
-        <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+        <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Utilization</th>
@@ -1113,7 +1129,7 @@ function DrilldownProjectsTable({
   return (
     <table className="min-w-full text-sm">
       <thead>
-        <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+        <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>
@@ -1222,7 +1238,7 @@ function ProjectTaskBreakdownTable({
   return (
     <table className="min-w-full text-sm">
       <thead>
-        <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+        <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>

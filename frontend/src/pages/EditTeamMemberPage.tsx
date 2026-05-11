@@ -26,6 +26,7 @@ import {
 } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 import { extractApiError } from '@/utils/errors';
+import { useDefaultCapacityHours } from '@/utils/preferences';
 import type {
   InviteRole,
   JobRole,
@@ -67,6 +68,7 @@ export default function EditTeamMemberPage() {
   const memberId = id ? Number.parseInt(id, 10) : NaN;
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.user);
+  const defaultCapacity = useDefaultCapacityHours();
   const { confirmDialog, ask } = useConfirm();
 
   const [member, setMember] = useState<TeamMemberDetail | null>(null);
@@ -79,7 +81,7 @@ export default function EditTeamMemberPage() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [employeeId, setEmployeeId] = useState('');
-  const [capacity, setCapacity] = useState('35');
+  const [capacity, setCapacity] = useState(defaultCapacity);
   const [permission, setPermission] = useState<InviteRole>('member');
   const [selectedJobRoleIds, setSelectedJobRoleIds] = useState<number[]>([]);
   const [rolesOpen, setRolesOpen] = useState(false);
@@ -106,7 +108,7 @@ export default function EditTeamMemberPage() {
         setLastName(m.last_name);
         setEmail(m.email);
         setEmployeeId(m.employee_id || '');
-        setCapacity(String(m.weekly_capacity_hours ?? '35'));
+        setCapacity(String(m.weekly_capacity_hours ?? defaultCapacity));
         setHourlyRate(m.hourly_rate != null ? String(m.hourly_rate) : '');
         setCostRate(m.cost_rate != null ? String(m.cost_rate) : '');
         setSelectedJobRoleIds(m.job_role_ids ?? []);
@@ -491,7 +493,7 @@ export default function EditTeamMemberPage() {
             <h2 className="font-heading text-lg font-bold text-text">Permissions</h2>
             <p className="mt-1 text-sm text-muted">
               {canEditPermission
-                ? 'Choose what this person can see and do in TrackFlow.'
+                ? 'Choose what this person can see and do in KlokView.'
                 : 'The workspace owner has full control and cannot be downgraded here.'}
             </p>
 

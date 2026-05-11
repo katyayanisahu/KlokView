@@ -1,3 +1,4 @@
+import { useAccountSettingsStore } from '@/store/accountSettingsStore';
 import type { BudgetType, ProjectType } from '@/types';
 
 export function formatBudget(amount: string | null, budgetType: BudgetType): string {
@@ -13,13 +14,38 @@ export function formatBudget(amount: string | null, budgetType: BudgetType): str
   return `${formatted} hr`;
 }
 
+// Currency code → display symbol. Mirrors Settings → Preferences.
+const CURRENCY_SYMBOL: Record<string, string> = {
+  INR: '₹',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  AUD: 'A$',
+  AED: 'د.إ ',
+  SGD: 'S$',
+};
+
+const NUMBER_FORMAT_LOCALE: Record<string, string> = {
+  '1,234.56': 'en-US',
+  '1.234,56': 'de-DE',
+  '1 234,56': 'fr-FR',
+};
+
+/**
+ * Format a money value using the workspace currency + number_format preferences.
+ * Falls back to USD / en-US when the settings store hasn't loaded yet.
+ */
 export function formatCurrency(amount: string | number): string {
   const num = typeof amount === 'string' ? Number.parseFloat(amount) : amount;
-  if (Number.isNaN(num)) return '$0.00';
-  return num.toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
+  const settings = useAccountSettingsStore.getState().settings;
+  const symbol = CURRENCY_SYMBOL[settings?.currency ?? 'USD'] ?? '$';
+  const locale = NUMBER_FORMAT_LOCALE[settings?.number_format ?? '1,234.56'] ?? 'en-US';
+  if (Number.isNaN(num)) return `${symbol}0.00`;
+  const formatted = num.toLocaleString(locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
+  return `${symbol}${formatted}`;
 }
 
 export const PROJECT_TYPE_LABEL: Record<ProjectType, string> = {

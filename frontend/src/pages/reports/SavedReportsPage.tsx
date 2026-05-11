@@ -99,11 +99,18 @@ export default function SavedReportsPage() {
     <div className="space-y-5">
       {confirmDialog}
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">Saved reports</h2>
-        <p className="mt-1 text-sm text-muted">
-          Quickly re-open any report configuration you've saved from the Time, Profitability, Detailed
-          Time, or Activity Log tabs.
-        </p>
+        <div className="flex items-start gap-3">
+          <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+            <Bookmark className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-heading text-2xl font-bold text-text sm:text-3xl">Saved reports</h2>
+            <p className="mt-1 text-sm text-muted">
+              Quickly re-open any report configuration you&apos;ve saved from the Time, Profitability,
+              Detailed Time, or Activity Log tabs.
+            </p>
+          </div>
+        </div>
         <div className="relative mt-4 inline-block" ref={ref}>
           <button
             type="button"
@@ -164,7 +171,7 @@ export default function SavedReportsPage() {
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wider text-muted">
+              <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
                 <th className="px-4 py-3 sm:px-5">Name</th>
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Owner</th>

@@ -10,12 +10,16 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from apps.accounts.models import merged_notification_prefs
+from apps.accounts.module_permissions import module_required
 from apps.accounts.tenant import TenantScopedMixin
 from apps.projects.models import ProjectMembership
 
-from .models import Submission, TimeEntry
+from .models import ImportBatch, Submission, TimeEntry
 from .serializers import (
+    ImportBatchSerializer,
     SubmissionCreateSerializer,
     SubmissionDecisionSerializer,
     SubmissionSerializer,
@@ -48,7 +52,17 @@ def _notify_approvers_of_submission(submission: Submission) -> None:
         .exclude(id=submission.user_id)
         .distinct()
     )
-    emails = list(recipients.values_list('email', flat=True))
+
+    emails = []
+    for user in recipients:
+        prefs = merged_notification_prefs(user)
+        is_people_approver = user.role in ('owner', 'admin')
+        is_project_approver = user.id in manager_ids
+        if (
+            (is_people_approver and prefs.get('approval_email_people'))
+            or (is_project_approver and prefs.get('approval_email_projects'))
+        ):
+            emails.append(user.email)
     if not emails:
         return
 
@@ -97,6 +111,43 @@ def _notify_approvers_of_submission(submission: Submission) -> None:
         message=body,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=emails,
+        fail_silently=not settings.DEBUG,
+    )
+
+
+def _notify_submitter_of_approval(submission: Submission) -> None:
+    """Email the submitter when their timesheet is approved (gated by pref)."""
+    submitter = submission.user
+    if not submitter or not submitter.is_active or not submitter.email:
+        return
+    prefs = merged_notification_prefs(submitter)
+    if not prefs.get('approval_email_approved'):
+        return
+
+    if submission.start_date == submission.end_date:
+        range_str = submission.start_date.strftime('%b %d, %Y')
+    else:
+        range_str = (
+            f"{submission.start_date.strftime('%b %d')} – "
+            f"{submission.end_date.strftime('%b %d, %Y')}"
+        )
+
+    approver = submission.decided_by
+    approver_name = (approver.full_name or approver.email) if approver else 'Your manager'
+
+    time_url = f"{settings.FRONTEND_URL.rstrip('/')}/time"
+    subject = f'[TrackFlow] Your timesheet for {range_str} was approved'
+    body = (
+        f"Hi {submitter.full_name or 'there'},\n\n"
+        f"{approver_name} approved your timesheet for {range_str}.\n\n"
+        f"View it here:\n{time_url}\n\n"
+        f"— TrackFlow"
+    )
+    send_mail(
+        subject=subject,
+        message=body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[submitter.email],
         fail_silently=not settings.DEBUG,
     )
 
@@ -266,6 +317,7 @@ class TimeEntryViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
         return self.update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
@@ -395,7 +447,7 @@ class SubmissionViewSet(TenantScopedMixin, viewsets.ModelViewSet):
 
     queryset = Submission.objects.select_related('user', 'decided_by')
     serializer_class = SubmissionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, module_required('timesheet_approval')]
     http_method_names = ['get', 'post', 'head', 'options']  # no PATCH/DELETE — use actions
 
     def get_queryset(self):
@@ -527,6 +579,41 @@ class SubmissionViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         submission.save(update_fields=[
             'status', 'decided_at', 'decided_by', 'decision_note', 'updated_at',
         ])
+
+        # Email submitter — best-effort; never block the response on email failure.
+        try:
+            _notify_submitter_of_approval(submission)
+        except Exception:
+            pass
+
+        return Response(
+            SubmissionSerializer(submission, context={'request': request}).data,
+        )
+
+    @action(detail=True, methods=['post'], url_path='unapprove')
+    def unapprove(self, request, pk=None):
+        """Revert an approved submission back to SUBMITTED so it can be re-decided.
+
+        Manager/admin/owner only. Status APPROVED is the only valid source state.
+        """
+        if request.user.role not in ('owner', 'admin', 'manager'):
+            return Response(
+                {'detail': 'Only managers and admins can withdraw approval.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        submission = self.get_object()
+        if submission.status != Submission.Status.APPROVED:
+            return Response(
+                {'detail': f'Cannot withdraw approval on a {submission.get_status_display().lower()} submission.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        submission.status = Submission.Status.SUBMITTED
+        submission.decided_at = None
+        submission.decided_by = None
+        submission.decision_note = ''
+        submission.save(update_fields=[
+            'status', 'decided_at', 'decided_by', 'decision_note', 'updated_at',
+        ])
         return Response(
             SubmissionSerializer(submission, context={'request': request}).data,
         )
@@ -564,3 +651,280 @@ class SubmissionViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         return Response(
             SubmissionSerializer(submission, context={'request': request}).data,
         )
+
+
+# -------- Import / Revert (Settings → Import/Export) --------
+
+import re as _re
+
+# Strip leading bracketed tags like "[SAMPLE]", "[ARCHIVED]", "(internal)" from a name
+# so an import value of "Monthly Retainer" matches a DB row "[SAMPLE] Monthly Retainer".
+_BRACKET_PREFIX_RE = _re.compile(r'^\s*[\[\(][^\]\)]+[\]\)]\s*')
+
+
+def _strip_prefix(name: str) -> str:
+    s = (name or '').strip().lower()
+    while True:
+        new_s = _BRACKET_PREFIX_RE.sub('', s)
+        if new_s == s:
+            return s
+        s = new_s
+
+
+def _name_lookup_maps(account_id: int):
+    """Pre-build {lower(name): obj} maps for projects/tasks/users in this account.
+
+    Two indexes per entity: exact-name (case-insensitive) and stripped-prefix
+    (e.g. "[SAMPLE] Foo" → "foo"). Lookups try exact first, then stripped, so
+    a CSV exported from another tracker without our [SAMPLE] tags still maps.
+    """
+    from apps.projects.models import Project, ProjectTask
+    UserModel = get_user_model()
+
+    projects: dict[str, object] = {}
+    projects_alt: dict[str, object] = {}
+    for p in Project.objects.filter(account_id=account_id):
+        exact = p.name.strip().lower()
+        projects[exact] = p
+        stripped = _strip_prefix(p.name)
+        if stripped and stripped != exact:
+            projects_alt.setdefault(stripped, p)
+
+    project_tasks: dict[tuple[int, str], object] = {}
+    project_tasks_alt: dict[tuple[int, str], object] = {}
+    for pt in ProjectTask.objects.filter(project__account_id=account_id).select_related('task'):
+        task_name = pt.task.name.strip().lower()
+        project_tasks[(pt.project_id, task_name)] = pt
+        stripped = _strip_prefix(pt.task.name)
+        if stripped and stripped != task_name:
+            project_tasks_alt.setdefault((pt.project_id, stripped), pt)
+
+    users_by_email = {
+        u.email.strip().lower(): u
+        for u in UserModel.objects.filter(account_id=account_id)
+    }
+    users_by_name = {
+        (u.full_name or '').strip().lower(): u
+        for u in UserModel.objects.filter(account_id=account_id) if u.full_name
+    }
+    return projects, projects_alt, project_tasks, project_tasks_alt, users_by_email, users_by_name
+
+
+def _suggest_names(query: str, candidates: list[str], limit: int = 3) -> list[str]:
+    """Cheap suggestion: substring match on either side, capped."""
+    q = (query or '').strip().lower()
+    if not q:
+        return []
+    hits = [c for c in candidates if q in c.lower() or c.lower() in q]
+    return hits[:limit]
+
+
+def _parse_import_date(value: str):
+    """Accept YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY."""
+    s = (value or '').strip()
+    if not s:
+        return None
+    from datetime import datetime as _dt
+    for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y'):
+        try:
+            return _dt.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+class ImportTimeEntriesView(APIView):
+    """POST /api/v1/imports/time/
+
+    Body: {
+      rows: [{date, project, task, person?, hours, notes?, billable?, row_label?}, ...],
+      source_filename?: str
+    }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from decimal import InvalidOperation as _InvalidOp
+
+        if request.user.role not in ('owner', 'admin'):
+            return Response(
+                {'detail': 'Only owners and admins can import time.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        rows = request.data.get('rows') or []
+        source_filename = (request.data.get('source_filename') or '')[:255]
+
+        if not isinstance(rows, list) or len(rows) == 0:
+            return Response({'detail': 'No rows provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        account_id = request.user.account_id
+        (
+            projects, projects_alt,
+            project_tasks, project_tasks_alt,
+            users_by_email, users_by_name,
+        ) = _name_lookup_maps(account_id)
+        all_project_names = [p.name for p in projects.values()]
+
+        batch = ImportBatch.objects.create(
+            account_id=account_id,
+            kind=ImportBatch.Kind.TIME_ENTRIES,
+            created_by=request.user,
+            source_filename=source_filename,
+        )
+
+        created_ids: list[int] = []
+        errors: list[dict] = []
+
+        for idx, raw in enumerate(rows, start=1):
+            row_label = raw.get('row_label') or f'Row {idx}'
+            project_name = (raw.get('project') or '').strip()
+            task_name = (raw.get('task') or '').strip()
+            person_ref = (raw.get('person') or '').strip()
+            hours_raw = raw.get('hours')
+            date_raw = raw.get('date') or ''
+            notes = (raw.get('notes') or '').strip()
+            billable_raw = raw.get('billable')
+
+            # Try exact match, then bracket-stripped fallback (handles Harvest CSVs
+            # that strip our [SAMPLE] prefix from project names).
+            project = None
+            if project_name:
+                key = project_name.strip().lower()
+                project = projects.get(key) or projects_alt.get(key) or projects_alt.get(_strip_prefix(project_name))
+            if not project:
+                hint = ''
+                suggestions = _suggest_names(project_name, all_project_names)
+                if suggestions:
+                    hint = f' Did you mean: {", ".join(repr(s) for s in suggestions)}?'
+                errors.append({
+                    'row': row_label,
+                    'error': f'Project not found: "{project_name}".{hint}',
+                })
+                continue
+
+            project_task = None
+            if task_name:
+                tkey = task_name.strip().lower()
+                project_task = (
+                    project_tasks.get((project.id, tkey))
+                    or project_tasks_alt.get((project.id, tkey))
+                    or project_tasks_alt.get((project.id, _strip_prefix(task_name)))
+                )
+            if not project_task:
+                # Tasks defined on this project (full names) for the suggestion.
+                proj_task_names = [
+                    pt_obj.task.name
+                    for (pid, _), pt_obj in project_tasks.items()
+                    if pid == project.id
+                ]
+                hint = ''
+                suggestions = _suggest_names(task_name, proj_task_names)
+                if suggestions:
+                    hint = f' Did you mean: {", ".join(repr(s) for s in suggestions)}?'
+                errors.append({
+                    'row': row_label,
+                    'error': f'Task not found on project "{project.name}": "{task_name}".{hint}',
+                })
+                continue
+
+            user_obj = None
+            if person_ref:
+                user_obj = users_by_email.get(person_ref.lower()) or users_by_name.get(person_ref.lower())
+                if not user_obj:
+                    errors.append({'row': row_label, 'error': f'Person not found: "{person_ref}"'})
+                    continue
+            else:
+                user_obj = request.user
+
+            parsed_date = _parse_import_date(date_raw)
+            if not parsed_date:
+                errors.append({'row': row_label, 'error': f'Invalid date: "{date_raw}"'})
+                continue
+
+            try:
+                hours = Decimal(str(hours_raw)) if hours_raw is not None else Decimal('0')
+            except (_InvalidOp, ValueError):
+                errors.append({'row': row_label, 'error': f'Invalid hours: "{hours_raw}"'})
+                continue
+            if hours < 0 or hours > Decimal('24'):
+                errors.append({'row': row_label, 'error': 'Hours must be 0-24.'})
+                continue
+
+            if billable_raw is None:
+                is_billable = project_task.is_billable
+            elif isinstance(billable_raw, bool):
+                is_billable = billable_raw
+            else:
+                is_billable = str(billable_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'billable')
+
+            entry = TimeEntry.objects.create(
+                account_id=account_id,
+                user=user_obj,
+                project=project,
+                project_task=project_task,
+                date=parsed_date,
+                hours=hours,
+                notes=notes,
+                is_billable=is_billable,
+                import_batch=batch,
+            )
+            created_ids.append(entry.id)
+
+        batch.record_count = len(created_ids)
+        date_min = None
+        date_max = None
+        if not created_ids:
+            # Empty batch — clean up so it never shows in the revert list.
+            batch.delete()
+            batch_payload = None
+        else:
+            batch.save(update_fields=['record_count'])
+            batch_payload = ImportBatchSerializer(batch).data
+            from django.db.models import Max, Min
+            agg = batch.time_entries.aggregate(min_d=Min('date'), max_d=Max('date'))
+            date_min = agg['min_d'].isoformat() if agg['min_d'] else None
+            date_max = agg['max_d'].isoformat() if agg['max_d'] else None
+
+        return Response({
+            'created': len(created_ids),
+            'errors': errors,
+            'batch': batch_payload,
+            'date_range': {'start': date_min, 'end': date_max},
+        })
+
+
+class ImportBatchListView(APIView):
+    """GET /api/v1/imports/ — list past import batches for this workspace."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role not in ('owner', 'admin'):
+            return Response(
+                {'detail': 'Only owners and admins can view imports.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        batches = ImportBatch.objects.filter(account_id=request.user.account_id)
+        return Response(ImportBatchSerializer(batches, many=True).data)
+
+
+class ImportBatchRevertView(APIView):
+    """DELETE /api/v1/imports/<id>/ — revert (delete every row created by this batch)."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        if request.user.role not in ('owner', 'admin'):
+            return Response(
+                {'detail': 'Only owners and admins can revert imports.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        batch = ImportBatch.objects.filter(
+            id=pk, account_id=request.user.account_id,
+        ).first()
+        if not batch:
+            return Response({'detail': 'Import not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        deleted_count = batch.time_entries.count()
+        batch.time_entries.all().delete()
+        batch.delete()
+        return Response({'reverted': deleted_count})

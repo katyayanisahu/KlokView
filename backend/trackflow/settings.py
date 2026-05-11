@@ -159,3 +159,7 @@ MS_REDIRECT_URI = config(
     'MS_REDIRECT_URI',
     default='http://localhost:8000/api/v1/integrations/outlook/oauth/callback/',
 )
+MS_SSO_REDIRECT_URI = config(
+    'MS_SSO_REDIRECT_URI',
+    default='http://localhost:8000/api/v1/auth/microsoft/callback/',
+)

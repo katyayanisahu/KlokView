@@ -1,0 +1,16 @@
+date,project,task,person,hours,notes,billable
+2026-03-09,NSD,Marketing,katyayanisahu123@gmail.com,4,Q1 campaign launch,yes
+2026-03-10,NSD,Programming,Yogesh Yadav,6,Database migration,yes
+2026-03-11,Bergen Debate Club,Sample,Carol Chen,3,Onboarding session,yes
+2026-03-12,Debate drills,Sample 2,Bob Lee,2,Spec review,no
+2026-03-13,NSD,Marketing,Jane Smith,2.5,Brand guidelines,yes
+2026-03-16,NSD,Programming,Yogesh Yadav,5,Performance tuning,yes
+2026-03-17,Debate drills,Marketing,Carol Chen,3,Email automation setup,yes
+2026-03-18,Bergen Debate Club,Sample,katyayanisahu123@gmail.com,4,Discovery workshop,yes
+2026-03-19,NSD,Programming,Bob Lee,4,Auth refactor,yes
+2026-03-20,Debate drills,Sample 2,Jane Smith,2.5,Smoke tests,no
+2026-04-02,NSD,Marketing,Carol Chen,3,Q2 planning,yes
+2026-04-03,Bergen Debate Club,Sample,Yogesh Yadav,2,Architecture call,yes
+2026-04-06,NSD,Programming,katyayanisahu123@gmail.com,5,Reports module,yes
+2026-04-07,Debate drills,Marketing,Bob Lee,1.5,Customer feedback review,yes
+2026-04-08,Debate drills,Sample 2,Jane Smith,3,Documentation pass,no
