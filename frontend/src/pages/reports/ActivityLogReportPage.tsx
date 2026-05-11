@@ -276,7 +276,7 @@ export default function ActivityLogReportPage() {
           <button
             type="button"
             onClick={() => setSaveModalOpen(true)}
-            className="btn-outline gap-2 px-3 py-2 text-sm"
+            className="btn-outline w-full justify-center gap-2 px-3 py-2 text-sm sm:w-auto"
           >
             <Save className="h-4 w-4" />
             Save report
@@ -345,8 +345,8 @@ export default function ActivityLogReportPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col items-stretch gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-5">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
             <MultiSelectDropdown
               label="Clients"
               options={clientOptions}
@@ -405,7 +405,7 @@ export default function ActivityLogReportPage() {
           <button
             type="button"
             onClick={handleExportCsv}
-            className="btn-outline gap-2 px-3 py-1.5 text-xs"
+            className="btn-outline w-full justify-center gap-2 px-3 py-1.5 text-xs sm:w-auto"
           >
             <Download className="h-3.5 w-3.5" />
             Export

@@ -478,14 +478,15 @@ function RoleFilterDropdown({
   setOpen: (v: boolean) => void;
 }) {
   return (
-    <div className="relative">
+    <div className="relative w-full sm:w-auto">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-text shadow-sm transition hover:bg-slate-50"
+        className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-text shadow-sm transition hover:bg-slate-50 sm:inline-flex sm:w-auto sm:grid-cols-none"
       >
-        {ROLE_FILTER_LABEL[value]}
-        <ChevronDown className="h-4 w-4 text-muted" />
+        <span aria-hidden className="sm:hidden" />
+        <span className="text-center sm:text-left">{ROLE_FILTER_LABEL[value]}</span>
+        <ChevronDown className="h-4 w-4 justify-self-end text-muted" />
       </button>
       {open ? (
         <>
@@ -494,7 +495,7 @@ function RoleFilterDropdown({
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <div className="absolute left-0 z-20 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg sm:left-auto sm:right-0">
+          <div className="absolute left-0 right-0 z-20 mt-1 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg sm:left-auto sm:w-52">
             {FILTER_SECTIONS.map((section, sIdx) => (
               <div
                 key={section.label ?? `section-${sIdx}`}

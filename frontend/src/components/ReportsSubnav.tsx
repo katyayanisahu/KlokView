@@ -26,7 +26,7 @@ export default function ReportsSubnav() {
   return (
     <div className="border-b border-slate-200 bg-white">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <div className="flex items-center gap-1 overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-1 sm:flex-nowrap sm:overflow-x-auto">
           {visibleTabs.map(({ label, to, icon: Icon }) => (
             <NavLink
               key={to}

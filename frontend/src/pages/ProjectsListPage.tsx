@@ -727,12 +727,12 @@ function ChipSelect<T extends number | 'all'>({
   const isActive = value !== 'all';
 
   return (
-    <div className="relative">
+    <div className="relative w-full sm:w-auto">
       <button
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium shadow-sm transition ${
+        className={`flex w-full items-center justify-between gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium shadow-sm transition sm:inline-flex sm:w-auto sm:justify-start ${
           disabled
             ? 'cursor-not-allowed border-slate-200 bg-white text-muted/50 shadow-none'
             : isActive
@@ -740,16 +740,18 @@ function ChipSelect<T extends number | 'all'>({
               : 'border-slate-300 bg-white text-text hover:border-primary/40 hover:bg-slate-50 hover:shadow-md'
         }`}
       >
-        <span className="text-muted">{label}:</span>
-        <span className={isActive ? 'font-semibold' : ''}>
-          {current?.label ?? 'All'}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="text-muted">{label}:</span>
+          <span className={`truncate ${isActive ? 'font-semibold' : ''}`}>
+            {current?.label ?? 'All'}
+          </span>
         </span>
-        <ChevronDown className="h-4 w-4 text-muted" />
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted" />
       </button>
       {open ? (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute left-0 z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white text-sm shadow-lg">
+          <div className="absolute left-0 right-0 z-20 mt-1 max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white text-sm shadow-lg sm:right-auto sm:w-56">
             {options.map((opt) => (
               <button
                 key={String(opt.value)}
@@ -858,10 +860,10 @@ function Metric({
   tone?: 'default' | 'danger';
 }) {
   return (
-    <div>
+    <div className="flex min-w-0 items-baseline justify-between gap-3 sm:block">
       <p className="text-sm font-semibold uppercase tracking-wider text-muted">{label}</p>
       <p
-        className={`mt-0.5 tabular-nums font-medium ${
+        className={`tabular-nums font-medium sm:mt-0.5 ${
           tone === 'danger' ? 'text-danger' : 'text-text'
         }`}
       >
@@ -929,7 +931,7 @@ function ProjectRow({
         selected ? 'bg-warning/10' : 'hover:bg-slate-50/50'
       }`}
     >
-      <div className="flex items-start gap-4">
+      <div className="flex flex-wrap items-start gap-4">
         {canEdit ? (
           <input
             type="checkbox"
@@ -982,8 +984,8 @@ function ProjectRow({
 
           {/* Metrics grid */}
           <div
-            className={`mt-2.5 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:gap-x-6 ${
-              canEdit ? 'sm:grid-cols-2 lg:grid-cols-4 lg:gap-y-1' : 'sm:grid-cols-3 sm:gap-y-1'
+            className={`mt-2.5 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 sm:gap-y-3 ${
+              canEdit ? 'lg:grid-cols-4 lg:gap-y-1' : 'sm:grid-cols-3 sm:gap-y-1'
             }`}
           >
             <Metric
@@ -1047,13 +1049,13 @@ function ProjectRow({
         </div>
 
         {/* Actions */}
-        <div className="shrink-0">
+        <div className="order-last w-full sm:order-none sm:w-auto sm:shrink-0">
           {canEdit ? (
             <div className="relative">
             <button
               type="button"
               onClick={onToggleMenu}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs font-medium text-text transition hover:bg-slate-100"
+              className="flex h-8 w-full items-center justify-center gap-1 rounded-md border border-slate-200 px-2 text-xs font-medium text-text transition hover:bg-slate-100 sm:inline-flex sm:w-auto"
               aria-label="Actions"
             >
               Actions
@@ -1062,7 +1064,7 @@ function ProjectRow({
             {isOpen ? (
               <>
                 <div className="fixed inset-0 z-10" onClick={onClose} aria-hidden="true" />
-                <div className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white text-sm shadow-lg">
+                <div className="absolute left-0 right-0 z-20 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white text-sm shadow-lg sm:left-auto sm:w-44">
                   {project.is_active ? (
                     <>
                       <button

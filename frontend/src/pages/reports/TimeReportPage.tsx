@@ -534,7 +534,7 @@ export default function TimeReportPage() {
           <button
             type="button"
             onClick={() => setSaveModalOpen(true)}
-            className="btn-outline gap-2 px-3 py-2 text-sm"
+            className="btn-outline w-full justify-center gap-2 px-3 py-2 text-sm sm:w-auto"
           >
             <Save className="h-4 w-4" />
             Save report

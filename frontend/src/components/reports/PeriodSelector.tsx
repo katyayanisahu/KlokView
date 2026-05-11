@@ -90,19 +90,22 @@ export default function PeriodSelector({
           />
         </div>
       ) : (
-        <h3 className="px-2 font-heading text-base font-bold text-text sm:px-4 sm:text-lg">{rangeLabel}</h3>
+        <h3 className="flex-1 px-2 text-center font-heading text-base font-bold text-text sm:flex-none sm:px-4 sm:text-left sm:text-lg">
+          {rangeLabel}
+        </h3>
       )}
-      <div className="relative" ref={ref}>
+      <div className="relative w-full sm:w-auto" ref={ref}>
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-text transition hover:bg-slate-50"
+          className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-text transition hover:bg-slate-50 sm:inline-flex sm:w-auto sm:grid-cols-none"
         >
-          {PERIOD_LABEL[period]}
-          <ChevronDown className="h-4 w-4 text-muted" />
+          <span aria-hidden className="sm:hidden" />
+          <span className="text-center sm:text-left">{PERIOD_LABEL[period]}</span>
+          <ChevronDown className="h-4 w-4 justify-self-end text-muted" />
         </button>
         {open ? (
-          <div className="absolute left-0 z-30 mt-1 w-44 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg sm:left-0">
+          <div className="absolute left-0 right-0 z-30 mt-1 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg sm:right-auto sm:w-44">
             {(Object.keys(PERIOD_LABEL) as Period[]).map((key) => (
               <button
                 key={key}

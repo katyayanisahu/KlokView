@@ -47,11 +47,11 @@ export default function MultiSelectDropdown({ label, options, selected, onChange
         : `${label} (${selected.length})`;
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative w-full sm:w-auto" ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+        className={`flex w-full items-center justify-between gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition sm:inline-flex sm:w-auto sm:justify-start ${
           selected.length > 0
             ? 'border-primary bg-primary-soft/40 text-primary'
             : 'border-slate-300 bg-white text-text hover:bg-slate-50'
@@ -73,7 +73,7 @@ export default function MultiSelectDropdown({ label, options, selected, onChange
         )}
       </button>
       {open ? (
-        <div className="absolute left-0 z-30 mt-1 max-h-72 w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+        <div className="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg sm:right-auto sm:w-56">
           {options.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted">No options</p>
           ) : (

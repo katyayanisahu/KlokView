@@ -111,17 +111,17 @@ export default function SavedReportsPage() {
             </p>
           </div>
         </div>
-        <div className="relative mt-4 inline-block" ref={ref}>
+        <div className="relative mt-4 block w-full sm:inline-block sm:w-auto" ref={ref}>
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-text transition hover:bg-slate-50"
+            className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-text transition hover:bg-slate-50 sm:inline-flex sm:w-auto sm:justify-start"
           >
             {FILTER_LABEL[filter]} ({counts[filter]})
             <ChevronDown className="h-4 w-4 text-muted" />
           </button>
           {open ? (
-            <div className="absolute left-0 z-20 mt-1 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+            <div className="absolute left-0 right-0 z-20 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg sm:right-auto sm:w-56">
               {(Object.keys(FILTER_LABEL) as Filter[]).map((key) => (
                 <button
                   key={key}
@@ -169,55 +169,62 @@ export default function SavedReportsPage() {
         </section>
       ) : (
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
-                <th className="px-4 py-3 sm:px-5">Name</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Owner</th>
-                <th className="px-4 py-3">Updated</th>
-                <th className="px-4 py-3 sm:px-5"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-bg/40">
-                  <td className="px-4 py-3 sm:px-5">
-                    <Link
-                      to={KIND_META[r.kind]?.to ?? '/reports'}
-                      className="font-semibold text-primary hover:underline"
-                    >
-                      {r.name}
-                    </Link>
-                    {r.is_shared ? (
-                      <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent-dark">
-                        Shared
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-3 text-text">{KIND_META[r.kind]?.label ?? r.kind}</td>
-                  <td className="px-4 py-3 text-text">
-                    {r.is_mine ? 'You' : r.owner_name || '—'}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted">
-                    {new Date(r.updated_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3 text-right sm:px-5">
-                    {r.is_mine ? (
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(r)}
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-muted transition hover:border-danger/40 hover:bg-danger/5 hover:text-danger"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
-                      </button>
-                    ) : null}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b-2 border-slate-200 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                  <th className="px-4 py-3 sm:px-5">Name</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="hidden px-4 py-3 sm:table-cell">Owner</th>
+                  <th className="hidden px-4 py-3 sm:table-cell">Updated</th>
+                  <th className="px-4 py-3 sm:px-5"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-bg/40">
+                    <td className="px-4 py-3 sm:px-5">
+                      <Link
+                        to={KIND_META[r.kind]?.to ?? '/reports'}
+                        className="font-semibold text-primary hover:underline"
+                      >
+                        {r.name}
+                      </Link>
+                      {r.is_shared ? (
+                        <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent-dark">
+                          Shared
+                        </span>
+                      ) : null}
+                      {/* Mobile-only: show owner + updated stacked under the name */}
+                      <p className="mt-1 text-xs text-muted sm:hidden">
+                        {r.is_mine ? 'You' : r.owner_name || '—'} ·{' '}
+                        {new Date(r.updated_at).toLocaleDateString()}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3 text-text">{KIND_META[r.kind]?.label ?? r.kind}</td>
+                    <td className="hidden px-4 py-3 text-text sm:table-cell">
+                      {r.is_mine ? 'You' : r.owner_name || '—'}
+                    </td>
+                    <td className="hidden px-4 py-3 text-xs text-muted sm:table-cell">
+                      {new Date(r.updated_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 text-right sm:px-5">
+                      {r.is_mine ? (
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(r)}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-muted transition hover:border-danger/40 hover:bg-danger/5 hover:text-danger"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </div>

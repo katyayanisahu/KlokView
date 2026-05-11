@@ -518,11 +518,11 @@ export default function ProjectDetailPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
               <select
                 value={chartRange}
                 onChange={(e) => setChartRange(e.target.value as RangeKey)}
-                className="input w-auto py-1.5 text-sm"
+                className="input w-full py-1.5 text-sm sm:w-auto"
                 aria-label="Chart time range"
               >
                 {(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => (
@@ -1242,8 +1242,11 @@ function ProjectChart({
   ];
 
   return (
-    <div className="w-full">
-      <svg viewBox={`0 0 ${W} ${H}`} className="block h-80 w-full">
+    <div className="w-full overflow-x-auto sm:overflow-x-visible">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="block h-80 w-[680px] sm:w-full"
+      >
         {/* gridlines + y labels */}
         {tickValues.map((v, i) => {
           const y = padT + innerH - (v / seriesMax) * innerH;

@@ -412,7 +412,7 @@ export default function DetailedTimeReportPage() {
           <button
             type="button"
             onClick={() => setSaveModalOpen(true)}
-            className="btn-outline gap-2 px-3 py-2 text-sm"
+            className="btn-outline w-full justify-center gap-2 px-3 py-2 text-sm sm:w-auto"
           >
             <Save className="h-4 w-4" />
             Save report
@@ -611,8 +611,8 @@ export default function DetailedTimeReportPage() {
             </div>
           ) : null}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 gap-2 border-b border-slate-100 px-4 py-3 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-5">
+            <div className="contents sm:flex sm:flex-wrap sm:items-center sm:gap-2">
               <SimpleSelect
                 value={show}
                 onChange={(v) => setShow(v as Show)}
@@ -624,13 +624,13 @@ export default function DetailedTimeReportPage() {
                 options={Object.entries(GROUP_LABEL).map(([v, l]) => ({ value: v, label: `Group by: ${l}` }))}
               />
             </div>
-            <div className="flex items-center gap-2">
-              <div className="relative">
+            <div className="contents sm:flex sm:items-center sm:gap-2">
+              <div className="relative w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => setActionsOpen((o) => !o)}
                   disabled={selected.size === 0 || actionBusy}
-                  className="btn-outline gap-1 px-3 py-1.5 text-xs disabled:opacity-50"
+                  className="btn-outline w-full gap-1 px-3 py-1.5 text-xs disabled:opacity-50 sm:w-auto"
                 >
                   {actionBusy ? 'Working…' : `Actions (${selected.size})`}
                   <ChevronDown className="h-4 w-4 text-muted" />
@@ -672,7 +672,7 @@ export default function DetailedTimeReportPage() {
               <button
                 type="button"
                 onClick={handleExportCsv}
-                className="btn-outline gap-2 px-3 py-1.5 text-xs"
+                className="btn-outline w-full gap-2 px-3 py-1.5 text-xs sm:w-auto"
               >
                 <Download className="h-3.5 w-3.5" />
                 Export
@@ -820,11 +820,11 @@ function SimpleSelect({
   options: { value: string; label: string }[];
 }) {
   return (
-    <div className="relative">
+    <div className="relative w-full sm:w-auto">
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="appearance-none rounded-lg border border-slate-300 bg-white px-3 py-1.5 pr-8 text-xs font-semibold text-text"
+        className="w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 py-1.5 pr-8 text-xs font-semibold text-text sm:w-auto"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

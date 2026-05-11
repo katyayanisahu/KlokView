@@ -481,7 +481,7 @@ export default function ProfitabilityReportPage() {
           <button
             type="button"
             onClick={() => setSaveModalOpen(true)}
-            className="btn-outline gap-2 px-3 py-2 text-sm"
+            className="btn-outline w-full justify-center gap-2 px-3 py-2 text-sm sm:w-auto"
           >
             <Save className="h-4 w-4" />
             Save report
@@ -525,11 +525,11 @@ export default function ProfitabilityReportPage() {
         ) : null}
 
         {/* Filter dropdowns */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           <select
             value={projectStatus}
             onChange={(e) => setProjectStatus(e.target.value as ProjectStatusFilter)}
-            className="input w-auto py-2 hover:bg-slate-50"
+            className="input w-full py-2 hover:bg-slate-50 sm:w-auto"
           >
             {PROJECT_STATUS_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -540,7 +540,7 @@ export default function ProfitabilityReportPage() {
           <select
             value={projectType}
             onChange={(e) => setProjectType(e.target.value as ProjectTypeFilter)}
-            className="input w-auto py-2 hover:bg-slate-50"
+            className="input w-full py-2 hover:bg-slate-50 sm:w-auto"
           >
             {PROJECT_TYPE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -551,7 +551,7 @@ export default function ProfitabilityReportPage() {
           <select
             value={projectManagerId}
             onChange={(e) => setProjectManagerId(e.target.value)}
-            className="input w-auto py-2 hover:bg-slate-50"
+            className="input w-full py-2 hover:bg-slate-50 sm:w-auto"
           >
             <option value="">All managers</option>
             {team.map((m) => (
@@ -637,7 +637,7 @@ export default function ProfitabilityReportPage() {
             </span>
           </div>
         </div>
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4">
           <ProfitTrendChart
             data={
               trendData ??
@@ -732,7 +732,7 @@ export default function ProfitabilityReportPage() {
           <button
             type="button"
             onClick={handleExportCsv}
-            className="btn-outline gap-2 px-3 py-1.5 text-xs"
+            className="btn-outline w-full justify-center gap-2 px-3 py-1.5 text-xs sm:w-auto"
           >
             <Download className="h-3.5 w-3.5" />
             Export
@@ -788,7 +788,7 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 function ProfitTrendChart({ data }: { data: TrendPoint[] | null }) {
   const width = 720;
   const height = 220;
-  const padding = { top: 16, right: 16, bottom: 28, left: 56 };
+  const padding = { top: 16, right: 16, bottom: 32, left: 88 };
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
 
@@ -822,11 +822,11 @@ function ProfitTrendChart({ data }: { data: TrendPoint[] | null }) {
   });
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[640px]" role="img" aria-label="Profit trend">
+    <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto w-full" role="img" aria-label="Profit trend">
       {gridLines.map((g, i) => (
         <g key={i}>
           <line x1={padding.left} x2={width - padding.right} y1={g.y} y2={g.y} stroke="#E5E7EB" strokeDasharray="3 3" />
-          <text x={padding.left - 8} y={g.y + 3} fontSize="10" textAnchor="end" fill="#6B778C">
+          <text x={padding.left - 8} y={g.y + 4} fontSize="13" textAnchor="end" fill="#6B778C">
             {formatMoney(g.value)}
           </text>
         </g>
@@ -853,7 +853,7 @@ function ProfitTrendChart({ data }: { data: TrendPoint[] | null }) {
               fill="#EF4444"
               rx={2}
             />
-            <text x={center} y={height - 8} fontSize="11" textAnchor="middle" fill="#6B778C">
+            <text x={center} y={height - 8} fontSize="13" textAnchor="middle" fill="#6B778C">
               {d.label}
             </text>
           </g>
