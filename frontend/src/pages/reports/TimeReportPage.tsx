@@ -162,8 +162,8 @@ export default function TimeReportPage() {
     setLoading(true);
     setLoadError(null);
     getTimeReport({
-      start: isAllTime ? undefined : range.start,
-      end: isAllTime ? undefined : range.end,
+      start: range.start,
+      end: range.end,
       active_only: activeOnly || undefined,
     })
       .then((data) => {
@@ -192,8 +192,8 @@ export default function TimeReportPage() {
     }
     let cancelled = false;
     getTimeReport({
-      start: isAllTime ? undefined : range.start,
-      end: isAllTime ? undefined : range.end,
+      start: range.start,
+      end: range.end,
       active_only: activeOnly || undefined,
       client_id: drilldownClientId,
     })
@@ -216,8 +216,8 @@ export default function TimeReportPage() {
     }
     let cancelled = false;
     getTimeReport({
-      start: isAllTime ? undefined : range.start,
-      end: isAllTime ? undefined : range.end,
+      start: range.start,
+      end: range.end,
       active_only: activeOnly || undefined,
       project_id: drilldownProjectId,
     })

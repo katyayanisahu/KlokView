@@ -98,8 +98,8 @@ export default function ActivityLogReportPage() {
     setLoadError(null);
     getActivityLog({
       type: subTab as ActivityType,
-      start: isAllTime ? undefined : range.start,
-      end: isAllTime ? undefined : range.end,
+      start: range.start,
+      end: range.end,
     })
       .then((data) => {
         if (!cancelled) setReport(data);

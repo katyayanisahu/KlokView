@@ -17,11 +17,13 @@ Role-based scoping (Harvest pattern):
     manager       → own entries + entries on projects they manage
     member        → own entries only
 """
+import zoneinfo
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db.models import Q
+from django.utils import timezone as dj_tz
 from rest_framework import serializers, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -605,6 +607,7 @@ class ActivityLogReportView(APIView):
 
         events: list[dict] = []
         user = request.user
+        user_tz = _user_tz(user)
 
         # ---- Time entries ----
         if type_filter in (None, 'timesheet'):
@@ -621,8 +624,8 @@ class ActivityLogReportView(APIView):
                     'id': f'te-{e.id}',
                     'type': 'timesheet',
                     'when': created.isoformat(),
-                    'date_label': _date_label(created),
-                    'time_label': _time_label(created),
+                    'date_label': _date_label(created, user_tz),
+                    'time_label': _time_label(created, user_tz),
                     'activity': f'Created a time entry for {entry_date_label}'.strip(),
                     'entry_date': e.date.isoformat() if e.date else None,
                     'entry_date_label': entry_date_label,
@@ -660,8 +663,8 @@ class ActivityLogReportView(APIView):
                     'id': f'sub-{s.id}',
                     'type': 'approval',
                     'when': s.submitted_at.isoformat(),
-                    'date_label': _date_label(s.submitted_at),
-                    'time_label': _time_label(s.submitted_at),
+                    'date_label': _date_label(s.submitted_at, user_tz),
+                    'time_label': _time_label(s.submitted_at, user_tz),
                     'activity': f'Submitted timesheet ({s.start_date} – {s.end_date})',
                     'client': '',
                     'project': '',
@@ -676,8 +679,8 @@ class ActivityLogReportView(APIView):
                         'id': f'sub-{s.id}-decision',
                         'type': 'approval',
                         'when': s.decided_at.isoformat(),
-                        'date_label': _date_label(s.decided_at),
-                        'time_label': _time_label(s.decided_at),
+                        'date_label': _date_label(s.decided_at, user_tz),
+                        'time_label': _time_label(s.decided_at, user_tz),
                         'activity': f'{s.status.capitalize()} timesheet ({s.start_date} – {s.end_date})',
                         'client': '',
                         'project': '',
@@ -700,8 +703,8 @@ class ActivityLogReportView(APIView):
                     'id': f'prj-{p.id}',
                     'type': 'project',
                     'when': p.created_at.isoformat(),
-                    'date_label': _date_label(p.created_at),
-                    'time_label': _time_label(p.created_at),
+                    'date_label': _date_label(p.created_at, user_tz),
+                    'time_label': _time_label(p.created_at, user_tz),
                     'activity': 'Created project',
                     'client': p.client.name,
                     'project': p.name,
@@ -720,11 +723,27 @@ class ActivityLogReportView(APIView):
         })
 
 
-def _date_label(value) -> str:
+def _user_tz(user):
+    tz_name = (
+        getattr(user, 'timezone', '')
+        or getattr(getattr(user, 'account', None), 'timezone', '')
+        or 'UTC'
+    )
+    try:
+        return zoneinfo.ZoneInfo(tz_name)
+    except zoneinfo.ZoneInfoNotFoundError:
+        return zoneinfo.ZoneInfo('UTC')
+
+
+def _date_label(value, tz=None) -> str:
+    if tz is not None and dj_tz.is_aware(value):
+        value = value.astimezone(tz)
     return value.strftime('%d/%m/%Y')
 
 
-def _time_label(value) -> str:
+def _time_label(value, tz=None) -> str:
+    if tz is not None and dj_tz.is_aware(value):
+        value = value.astimezone(tz)
     return value.strftime('%I:%M %p').lstrip('0')
 
 

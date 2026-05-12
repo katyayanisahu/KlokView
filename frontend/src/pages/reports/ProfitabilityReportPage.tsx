@@ -202,8 +202,8 @@ export default function ProfitabilityReportPage() {
     setLoading(true);
     setLoadError(null);
     getProfitabilityReport({
-      start: isAllTime ? undefined : range.start,
-      end: isAllTime ? undefined : range.end,
+      start: range.start,
+      end: range.end,
       project_status: projectStatus || undefined,
       project_type: projectType || undefined,
       project_manager_id: projectManagerId ? Number.parseInt(projectManagerId, 10) : undefined,
@@ -234,8 +234,8 @@ export default function ProfitabilityReportPage() {
     }
     let cancelled = false;
     getProfitabilityReport({
-      start: isAllTime ? undefined : range.start,
-      end: isAllTime ? undefined : range.end,
+      start: range.start,
+      end: range.end,
       project_status: projectStatus || undefined,
       project_type: projectType || undefined,
       project_manager_id: projectManagerId ? Number.parseInt(projectManagerId, 10) : undefined,
@@ -263,8 +263,8 @@ export default function ProfitabilityReportPage() {
     }
     let cancelled = false;
     getProfitabilityReport({
-      start: isAllTime ? undefined : range.start,
-      end: isAllTime ? undefined : range.end,
+      start: range.start,
+      end: range.end,
       project_status: projectStatus || undefined,
       project_type: projectType || undefined,
       project_manager_id: projectManagerId ? Number.parseInt(projectManagerId, 10) : undefined,

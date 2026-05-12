@@ -130,8 +130,8 @@ export default function TeamPage() {
     let cancelled = false;
     setWindowLoading(true);
     getTimeReport({
-      start: isAllTime ? undefined : range.start,
-      end: isAllTime ? undefined : range.end,
+      start: range.start,
+      end: range.end,
     })
       .then((data) => {
         if (cancelled) return;
