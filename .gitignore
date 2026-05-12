@@ -1,3 +1,7 @@
+# ──────────── Dev binaries (never commit) ────────────
+cloudflared*.exe
+*.exe.exe
+
 # ──────────── Python / Django ────────────
 __pycache__/
 *.py[cod]
