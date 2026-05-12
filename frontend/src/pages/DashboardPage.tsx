@@ -2788,46 +2788,56 @@ export default function DashboardPage() {
                             className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                           />
                         </label>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input
-                            type="time"
-                            value={startTimeInput}
-                            onChange={(e) => {
-                              setStartTimeInput(e.target.value);
-                              if (endTimeInput) {
-                                setHoursInput(hoursFromStartEnd(e.target.value, endTimeInput));
+                        <div className="flex flex-wrap items-end gap-2">
+                          <label className="flex flex-col">
+                            <span className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">
+                              Start
+                            </span>
+                            <input
+                              type="time"
+                              value={startTimeInput}
+                              onChange={(e) => {
+                                setStartTimeInput(e.target.value);
+                                if (endTimeInput) {
+                                  setHoursInput(hoursFromStartEnd(e.target.value, endTimeInput));
+                                }
+                              }}
+                              className="w-32 rounded-lg border border-slate-200 px-3 py-2.5 text-center text-sm font-mono text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            />
+                          </label>
+                          <span className="pb-3 text-sm text-muted">to</span>
+                          <label className="flex flex-col">
+                            <span className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">
+                              End
+                            </span>
+                            <input
+                              type="time"
+                              value={endTimeInput}
+                              onChange={(e) => {
+                                setEndTimeInput(e.target.value);
+                                if (startTimeInput) {
+                                  setHoursInput(hoursFromStartEnd(startTimeInput, e.target.value));
+                                }
+                              }}
+                              className="w-32 rounded-lg border border-slate-200 px-3 py-2.5 text-center text-sm font-mono text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            />
+                          </label>
+                          <span className="pb-3 text-sm text-muted">=</span>
+                          <label className="flex flex-col">
+                            <span className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">
+                              Duration
+                            </span>
+                            <input
+                              type="text"
+                              value={
+                                hoursInput
+                                  ? formatHoursDisplay(Number.parseFloat(hoursInput) || 0, 'hh_mm')
+                                  : '0:00'
                               }
-                            }}
-                            placeholder="Start time"
-                            aria-label="Start time"
-                            className="w-32 rounded-lg border border-slate-200 px-3 py-2.5 text-center text-sm font-mono text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                          />
-                          <span className="text-sm text-muted">to</span>
-                          <input
-                            type="time"
-                            value={endTimeInput}
-                            onChange={(e) => {
-                              setEndTimeInput(e.target.value);
-                              if (startTimeInput) {
-                                setHoursInput(hoursFromStartEnd(startTimeInput, e.target.value));
-                              }
-                            }}
-                            placeholder="End time"
-                            aria-label="End time"
-                            className="w-32 rounded-lg border border-slate-200 px-3 py-2.5 text-center text-sm font-mono text-text transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                          />
-                          <span className="text-sm text-muted">=</span>
-                          <input
-                            type="text"
-                            value={
-                              hoursInput
-                                ? formatHoursDisplay(Number.parseFloat(hoursInput) || 0, 'hh_mm')
-                                : '0:00'
-                            }
-                            readOnly
-                            aria-label="Duration"
-                            className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-center text-sm font-mono font-semibold text-text"
-                          />
+                              readOnly
+                              className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-center text-sm font-mono font-semibold text-text"
+                            />
+                          </label>
                         </div>
                       </div>
                     ) : (

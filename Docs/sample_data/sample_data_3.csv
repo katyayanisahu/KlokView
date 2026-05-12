@@ -1,0 +1,15 @@
+Client,Project,Project Code,Start Date,End Date,Project Notes
+Globex Corporation,Worldwide CRM Rollout,GLBX-CRM-01,01-01-2026,30-06-2026,Replace fragmented regional CRMs with a unified Salesforce instance
+Globex Corporation,Data Center Migration,GLBX-DCM-02,15-02-2026,31-08-2026,Move three on-prem data centers to a multi-region cloud
+Dunder Mifflin,Paper Inventory Tracker,DNMF-INV-01,01-03-2026,30-09-2026,Realtime inventory across Scranton Utica and Stamford branches
+Dunder Mifflin,Customer Loyalty Portal,DNMF-LYL-02,15-04-2026,15-10-2026,Tier-based discount portal with B2B catalog access
+Massive Dynamic,AI Research Platform,MSDM-AIR-01,10-01-2026,31-12-2026,Internal ML experiment tracker with GPU job scheduler
+Massive Dynamic,Bioinformatics Cluster,MSDM-BIO-02,05-02-2026,30-08-2026,Genomic sequencing pipeline on Kubernetes
+Vandelay Industries,Latex Supplier Portal,VAND-LSP-01,20-01-2026,20-07-2026,Vendor onboarding and PO automation
+Vandelay Industries,Import-Export Compliance,VAND-IMP-02,01-04-2026,31-12-2026,US customs filing automation across 12 ports
+Tyrell Corporation,Replicant Lifecycle Tracker,TYRL-RLT-01,15-03-2026,30-11-2026,Production unit serial tracking with field service ticketing
+Tyrell Corporation,Off-World Marketing Site,TYRL-MKT-02,01-05-2026,31-10-2026,Multi-language marketing microsite for colony recruitment
+Aperture Science,Portal Gun Firmware,APRT-PGF-01,10-02-2026,30-09-2026,Embedded controller rewrite with safety telemetry
+Aperture Science,Testing Chamber UX,APRT-TCX-02,01-06-2026,31-12-2026,Operator console refresh with new graphics pipeline
+Nakatomi Trading,Tokyo HQ Network Refresh,NKTM-NET-01,15-01-2026,31-07-2026,Replace 90s-era fiber backbone with 100Gbps mesh
+Nakatomi Trading,Vault Security Audit,NKTM-VLT-02,01-03-2026,30-06-2026,Pen-test legacy access control and physical security integrations

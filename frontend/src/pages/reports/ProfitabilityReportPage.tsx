@@ -821,6 +821,17 @@ function ProfitTrendChart({ data }: { data: TrendPoint[] | null }) {
     return { cx, cy };
   });
 
+  // X-axis labels arrive as "MMM YYYY" (e.g. "Jan 2026"). When every bin shares
+  // the same year — which is always true for the year period and usually for
+  // quarter — drop the redundant year suffix so 12 monthly labels fit without
+  // overlapping at this width. The active year is already shown in the period
+  // header above the chart.
+  const yearMatches = points.map((p) => p.label.match(/\s(\d{4})$/)?.[1]);
+  const sameYear =
+    yearMatches.every((y) => y && y === yearMatches[0]) && yearMatches[0] !== undefined;
+  const displayLabel = (label: string) =>
+    sameYear ? label.replace(/\s\d{4}$/, '') : label;
+
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto w-full" role="img" aria-label="Profit trend">
       {gridLines.map((g, i) => (
@@ -853,8 +864,8 @@ function ProfitTrendChart({ data }: { data: TrendPoint[] | null }) {
               fill="#EF4444"
               rx={2}
             />
-            <text x={center} y={height - 8} fontSize="13" textAnchor="middle" fill="#6B778C">
-              {d.label}
+            <text x={center} y={height - 8} fontSize="11" textAnchor="middle" fill="#6B778C">
+              {displayLabel(d.label)}
             </text>
           </g>
         );

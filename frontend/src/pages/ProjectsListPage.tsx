@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ChevronDown,
@@ -1147,6 +1147,11 @@ function ImportProjectsModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
+  const [importedCount, setImportedCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [phase, setPhase] = useState<'idle' | 'clients' | 'projects'>('idle');
+  // Ref so the in-flight loop can detect cancellation without re-rendering.
+  const cancelRef = useRef(false);
 
   // Proper CSV line parser (handles quoted fields with embedded commas).
   const parseCsvLine = (line: string): string[] => {
@@ -1240,7 +1245,12 @@ function ImportProjectsModal({
       const allRows = text
         .split(/\r?\n/)
         .filter((line) => line.trim().length > 0)
-        .map(parseCsvLine);
+        .map(parseCsvLine)
+        // Excel/Sheets often pad files with trailing rows that contain only
+        // commas (e.g. ",,,,,"). After parsing those become arrays of empty
+        // strings — drop them silently so they don't show up as user-facing
+        // "missing client or project name" failures.
+        .filter((row) => row.some((cell) => cell != null && cell.trim().length > 0));
 
       // Skip header row when first cell looks like a header.
       const first = allRows[0]?.[0]?.toLowerCase() ?? '';
@@ -1320,10 +1330,14 @@ function ImportProjectsModal({
       }
 
       // Resolve every unique client up front so we don't create duplicates.
+      // Use a large page_size so workspaces with >25 clients don't miss matches.
+      setPhase('clients');
+      setTotalCount(parsed.length);
+      setImportedCount(0);
       setProgress('Loading clients…');
       const clientByName = new Map<string, number>();
       try {
-        const existing = await listClients();
+        const existing = await listClients({ page_size: 1000 });
         for (const c of existing.results) {
           clientByName.set(c.name.trim().toLowerCase(), c.id);
         }
@@ -1354,18 +1368,25 @@ function ImportProjectsModal({
         );
       }
 
-      // Create projects. Run in batches of 5 in parallel — fast but bounded so
-      // we don't overwhelm the backend if the file is large.
+      // Create projects. Run in batches of 25 in parallel — fast for typical
+      // CSVs (<25 rows go in one round-trip) but still bounded so the backend
+      // dev server doesn't choke on huge files. Per-row counter updates as
+      // each promise resolves so the user sees granular progress.
+      setPhase('projects');
+      setProgress(null);
       const created: string[] = [];
-      const BATCH = 5;
+      const BATCH = 25;
+      cancelRef.current = false;
       for (let i = 0; i < parsed.length; i += BATCH) {
+        if (cancelRef.current) break;
         const batch = parsed.slice(i, i + BATCH);
-        setProgress(`Importing ${Math.min(i + BATCH, parsed.length)}/${parsed.length}…`);
         await Promise.all(
           batch.map(async (p) => {
+            if (cancelRef.current) return;
             const clientId = clientByName.get(p.clientName.toLowerCase());
             if (!clientId) {
               failures.push(`Row ${p.idx} (${p.projectName}): client "${p.clientName}" unavailable`);
+              setImportedCount((n) => n + 1);
               return;
             }
             try {
@@ -1380,12 +1401,15 @@ function ImportProjectsModal({
               created.push(p.projectName);
             } catch (err) {
               failures.push(`Row ${p.idx} (${p.projectName}): ${extractApiError(err, 'failed')}`);
+            } finally {
+              setImportedCount((n) => n + 1);
             }
           }),
         );
       }
 
       setProgress(null);
+      setPhase('idle');
 
       if (created.length === 0) {
         setErrorMsg(
@@ -1398,14 +1422,27 @@ function ImportProjectsModal({
       }
 
       if (failures.length) {
-        alert(
+        // Render failures inline so the modal doesn't get stuck behind a
+        // blocking browser alert (and so Cancel remains discoverable).
+        setErrorMsg(
           `Imported ${created.length} project${created.length === 1 ? '' : 's'}. ${failures.length} failed:\n${failures.join('\n')}`,
         );
+        setSubmitting(false);
+        setPhase('idle');
+        // Refresh the projects list in the background so the user sees the
+        // successful imports without dismissing the failure summary first.
+        onImported();
+        return;
       }
+      // All rows imported cleanly — refresh the list and close the modal.
+      setSubmitting(false);
+      setPhase('idle');
       onImported();
+      onClose();
     } catch (err) {
       setErrorMsg(extractApiError(err, 'Could not import projects.'));
       setProgress(null);
+      setPhase('idle');
       setSubmitting(false);
     }
   };
@@ -1465,9 +1502,36 @@ function ImportProjectsModal({
                 className="h-8 w-8 animate-spin rounded-full border-2 border-primary/30 border-t-primary"
                 aria-hidden="true"
               />
-              <p className="text-sm font-semibold text-primary">
-                {progress ?? 'Importing…'}
-              </p>
+              {totalCount > 0 ? (
+                <>
+                  <p className="text-sm font-semibold text-primary">
+                    {phase === 'projects' ? (
+                      <>
+                        Imported {importedCount} of {totalCount}
+                        {importedCount < totalCount ? (
+                          <span className="ml-1 text-text/80">
+                            · {totalCount - importedCount} remaining
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      progress ?? `Preparing ${totalCount} row${totalCount === 1 ? '' : 's'}…`
+                    )}
+                  </p>
+                  <div className="h-2 w-full max-w-xs overflow-hidden rounded-full bg-white">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{
+                        width: `${Math.round((importedCount / totalCount) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm font-semibold text-primary">
+                  {progress ?? 'Importing…'}
+                </p>
+              )}
               <p className="text-xs text-muted">
                 This may take a moment for larger files. Don't close this window.
               </p>
@@ -1509,9 +1573,15 @@ function ImportProjectsModal({
         <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-3">
           <button
             type="button"
-            onClick={onClose}
-            disabled={submitting}
-            className="btn-outline disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => {
+              // Signal the in-flight import loop to stop, then close the modal.
+              // In-flight HTTP requests still complete — but no new rows start.
+              cancelRef.current = true;
+              setSubmitting(false);
+              setPhase('idle');
+              onClose();
+            }}
+            className="btn-outline"
           >
             Cancel
           </button>
@@ -1521,7 +1591,11 @@ function ImportProjectsModal({
             disabled={!preview || submitting}
             className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {submitting ? 'Importing…' : 'Upload and import projects'}
+            {submitting
+              ? totalCount > 0
+                ? `Importing ${importedCount}/${totalCount}…`
+                : 'Importing…'
+              : 'Upload and import projects'}
           </button>
         </div>
       </div>

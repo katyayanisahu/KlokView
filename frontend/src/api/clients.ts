@@ -1,7 +1,9 @@
 import api from './client';
 import type { Client, ClientContact, ClientContactPayload, ClientCreatePayload, Paginated } from '@/types';
 
-export async function listClients(params?: { is_active?: boolean; search?: string }): Promise<Paginated<Client>> {
+export async function listClients(
+  params?: { is_active?: boolean; search?: string; page_size?: number },
+): Promise<Paginated<Client>> {
   const { data } = await api.get<Paginated<Client>>('/clients/', { params });
   return data;
 }
