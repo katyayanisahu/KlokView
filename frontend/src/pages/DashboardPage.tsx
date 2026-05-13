@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar,
   ChevronDown,
@@ -73,7 +73,13 @@ import type {
 } from '@/types';
 
 type Tab = 'timesheet' | 'approval';
-type View = 'day' | 'week';
+type View = 'day' | 'week' | 'custom';
+
+const VIEW_LABEL: Record<View, string> = {
+  day: 'Day',
+  week: 'Week',
+  custom: 'Custom',
+};
 
 function ymd(date: Date): string {
   const y = date.getFullYear();
@@ -855,6 +861,7 @@ function EntryRow({
   onDelete,
   onStop,
   onStartFromRow,
+  showDate = false,
 }: {
   entry: TimeEntry;
   editingId: number | null;
@@ -866,6 +873,7 @@ function EntryRow({
   onDelete: (e: TimeEntry) => void;
   onStop: () => void;
   onStartFromRow: (e: TimeEntry) => void;
+  showDate?: boolean;
 }) {
   return (
     <li
@@ -880,6 +888,13 @@ function EntryRow({
       }`}
     >
       <div className="min-w-0">
+        {showDate ? (
+          <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-primary">
+            {new Date(entry.date + 'T00:00:00').toLocaleDateString('en-US', {
+              weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+            })}
+          </p>
+        ) : null}
         <p className="font-heading text-base font-bold text-text">{entry.project_name}</p>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
           <p className="text-sm font-medium text-text/70">{entry.client_name}</p>
@@ -1103,6 +1118,7 @@ export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const role = user?.role ?? 'member';
   const canSeeTeammates = role === 'admin' || role === 'owner' || role === 'manager';
+  const showBillableHours = role !== 'member';
   const { confirmDialog, ask } = useConfirm();
   const weekStartsOn = useWeekStart();
   const timerMode = useTimerMode();
@@ -1114,6 +1130,14 @@ export default function DashboardPage() {
   });
   const [activeTab, setActiveTab] = useState<Tab>('timesheet');
   const [view, setView] = useState<View>('day');
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewMenuRef = useRef<HTMLDivElement | null>(null);
+  const [customStart, setCustomStart] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(1);
+    return ymd(d);
+  });
+  const [customEnd, setCustomEnd] = useState<string>(() => ymd(new Date()));
   const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   // Quick-add form state
@@ -1279,6 +1303,18 @@ export default function DashboardPage() {
     if (pt && editingId === null) setBillable(pt.is_billable);
   }, [projectTaskId, projectTasks, editingId]);
 
+  // Close the view dropdown on outside click.
+  useEffect(() => {
+    if (!viewMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) {
+        setViewMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [viewMenuOpen]);
+
   // Load entries for the active week
   const weekStart = useMemo(() => startOfWeek(currentDate, weekStartsOn), [currentDate, weekStartsOn]);
   const weekEndStr = useMemo(() => {
@@ -1288,13 +1324,17 @@ export default function DashboardPage() {
   }, [weekStart]);
   const weekStartStr = useMemo(() => ymd(weekStart), [weekStart]);
 
+  // In Custom view, fetch entries across the user-defined range instead of just the week.
+  const fetchStartStr = view === 'custom' ? customStart : weekStartStr;
+  const fetchEndStr = view === 'custom' ? customEnd : weekEndStr;
+
   const effectiveUserId = viewingUserId ?? user?.id ?? 0;
 
   const refetchEntries = () => {
     setEntriesLoading(true);
     listTimeEntries({
-      start_date: weekStartStr,
-      end_date: weekEndStr,
+      start_date: fetchStartStr,
+      end_date: fetchEndStr,
       user_id: viewingUserId ?? undefined,
     })
       .then((rows) => setWeekEntries(rows))
@@ -1306,8 +1346,8 @@ export default function DashboardPage() {
     let cancelled = false;
     setEntriesLoading(true);
     listTimeEntries({
-      start_date: weekStartStr,
-      end_date: weekEndStr,
+      start_date: fetchStartStr,
+      end_date: fetchEndStr,
       user_id: viewingUserId ?? undefined,
     })
       .then((rows) => {
@@ -1322,7 +1362,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [weekStartStr, weekEndStr, viewingUserId]);
+  }, [fetchStartStr, fetchEndStr, viewingUserId]);
 
   // Fetch the active submission (if any) for whoever is being viewed for this week.
   const refetchActiveSubmission = () => {
@@ -1368,6 +1408,24 @@ export default function DashboardPage() {
   const dayEntries = useMemo(
     () => weekEntries.filter((e) => e.date === activeDateStr && e.user_id === effectiveUserId),
     [weekEntries, activeDateStr, effectiveUserId],
+  );
+
+  // Entries scoped to the active timesheet's user — used by the Custom range list
+  // (and re-used below for day/week totals).
+  const rangeEntries = useMemo(
+    () =>
+      weekEntries
+        .filter((e) => e.user_id === effectiveUserId)
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    [weekEntries, effectiveUserId],
+  );
+  const rangeTotal = useMemo(
+    () => rangeEntries.reduce((sum, e) => sum + num(e.hours), 0),
+    [rangeEntries],
+  );
+  const rangeBillable = useMemo(
+    () => rangeEntries.filter((e) => e.is_billable).reduce((sum, e) => sum + num(e.hours), 0),
+    [rangeEntries],
   );
 
   const hoursByDate = useMemo(() => {
@@ -2175,6 +2233,16 @@ export default function DashboardPage() {
 
   const selectedProject = projects.find((p) => p.id === projectId);
   const selectedTask = projectTasks.find((p) => p.id === projectTaskId);
+  // Harvest-style: split tasks into billable + non-billable groups so the
+  // dropdown shows section headers instead of inline per-row badges.
+  const taskGroups = useMemo(() => {
+    const billable: ProjectTaskEntry[] = [];
+    const nonBillable: ProjectTaskEntry[] = [];
+    projectTasks.forEach((pt) => {
+      (pt.is_billable ? billable : nonBillable).push(pt);
+    });
+    return { billable, nonBillable };
+  }, [projectTasks]);
 
   return (
     <div className="min-h-screen bg-bg pb-12">
@@ -2256,6 +2324,28 @@ export default function DashboardPage() {
             {/* Date controls */}
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
               <div className="flex flex-wrap items-center gap-2">
+                {view === 'custom' ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="date"
+                      value={customStart}
+                      max={customEnd || undefined}
+                      onChange={(e) => setCustomStart(e.target.value)}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-text"
+                      aria-label="Custom start date"
+                    />
+                    <span className="text-sm font-medium text-muted">to</span>
+                    <input
+                      type="date"
+                      value={customEnd}
+                      min={customStart || undefined}
+                      onChange={(e) => setCustomEnd(e.target.value)}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-text"
+                      aria-label="Custom end date"
+                    />
+                  </div>
+                ) : (
+                <>
                 <button
                   type="button"
                   onClick={() => shift(-1)}
@@ -2354,47 +2444,54 @@ export default function DashboardPage() {
                   <Calendar className="h-3.5 w-3.5" />
                   Jump to today
                 </button>
+                </>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-4">
-                <div
-                  role="tablist"
-                  aria-label="Timesheet view"
-                  className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1"
-                >
-                  {(['day', 'week'] as const).map((v) => (
-                    <button
-                      key={v}
-                      type="button"
-                      role="tab"
-                      aria-selected={view === v}
-                      onClick={() => setView(v)}
-                      className={`rounded-md px-5 py-1.5 text-sm font-bold capitalize transition ${
-                        view === v
-                          ? 'bg-primary text-white shadow-sm'
-                          : 'text-muted hover:bg-slate-200/60 hover:text-text'
-                      }`}
-                    >
-                      {v}
-                    </button>
-                  ))}
+                <div className="relative" ref={viewMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setViewMenuOpen((o) => !o)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary-soft px-3 py-2 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary-soft/80"
+                    aria-haspopup="listbox"
+                    aria-expanded={viewMenuOpen}
+                  >
+                    <span>{VIEW_LABEL[view]}</span>
+                    <ChevronDown className="h-4 w-4 text-primary" />
+                  </button>
+                  {viewMenuOpen ? (
+                    <div className="absolute right-0 z-30 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+                      {(['day', 'week', 'custom'] as const).map((v) => (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() => {
+                            setView(v);
+                            setViewMenuOpen(false);
+                          }}
+                          className={`block w-full px-3 py-2 text-left text-sm transition hover:bg-primary-soft/40 ${
+                            view === v ? 'bg-primary-soft/30 font-semibold text-primary' : 'text-text'
+                          }`}
+                        >
+                          {VIEW_LABEL[v]}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 {canSeeTeammates ? (
                   <div className="relative">
                     <button
                       type="button"
                       onClick={() => setTeammatesMenuOpen((o) => !o)}
-                      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium shadow-sm transition ${
-                        viewingUserId !== null
-                          ? 'border-primary bg-primary-soft text-primary'
-                          : 'border-slate-200 bg-white text-text hover:bg-slate-50'
-                      }`}
+                      className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary-soft px-3 py-1.5 text-sm font-medium text-primary shadow-sm transition hover:bg-primary-soft/80"
                     >
-                      <Users className={`h-4 w-4 ${viewingUserId !== null ? 'text-primary' : 'text-muted'}`} />
+                      <Users className="h-4 w-4 text-primary" />
                       {viewingUserId === null
                         ? 'Your timesheet'
                         : teammates.find((u) => u.id === viewingUserId)?.full_name ?? 'Teammate'}
-                      <ChevronDown className="h-4 w-4 text-muted" />
+                      <ChevronDown className="h-4 w-4 text-primary" />
                     </button>
                     {teammatesMenuOpen ? (
                       <>
@@ -2454,8 +2551,9 @@ export default function DashboardPage() {
             </div>
 
             {/* Week chips — Harvest hides this in Week view (the entries
-                table itself has day columns), so we do the same. */}
-            {view !== 'week' ? (
+                table itself has day columns). Also hidden in Custom view
+                where the chosen range may not align with a single week. */}
+            {view === 'day' ? (
               <div className="overflow-hidden">
                 <WeekBar
                   days={weekDays}
@@ -2491,7 +2589,7 @@ export default function DashboardPage() {
               </div>
             ) : null}
 
-            {activeSubmission && activeSubmission.status === 'rejected' && view !== 'week' ? (
+            {activeSubmission && activeSubmission.status === 'rejected' && view === 'day' ? (
               <SubmissionStatusBanner
                 submission={activeSubmission}
                 canWithdraw={false}
@@ -2742,30 +2840,56 @@ export default function DashboardPage() {
                                   No tasks on this project yet.
                                 </div>
                               ) : (
-                                projectTasks.map((pt) => (
-                                  <button
-                                    key={pt.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setProjectTaskId(pt.id);
-                                      setTaskMenuOpen(false);
-                                    }}
-                                    className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition hover:bg-bg ${
-                                      pt.id === projectTaskId ? 'bg-primary-soft/40 font-semibold text-primary' : 'text-text'
-                                    }`}
-                                  >
-                                    <span>{pt.task_name}</span>
-                                    {pt.is_billable ? (
-                                      <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent-dark">
+                                <>
+                                  {taskGroups.billable.length > 0 ? (
+                                    <>
+                                      <div className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-accent-dark">
                                         Billable
-                                      </span>
-                                    ) : (
-                                      <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-text/70">
-                                        Non-billable
-                                      </span>
-                                    )}
-                                  </button>
-                                ))
+                                      </div>
+                                      {taskGroups.billable.map((pt) => (
+                                        <button
+                                          key={pt.id}
+                                          type="button"
+                                          onClick={() => {
+                                            setProjectTaskId(pt.id);
+                                            setTaskMenuOpen(false);
+                                          }}
+                                          className={`block w-full px-3 py-2 text-left text-sm transition hover:bg-bg ${
+                                            pt.id === projectTaskId
+                                              ? 'bg-primary-soft/40 font-semibold text-primary'
+                                              : 'text-text'
+                                          }`}
+                                        >
+                                          {pt.task_name}
+                                        </button>
+                                      ))}
+                                    </>
+                                  ) : null}
+                                  {taskGroups.nonBillable.length > 0 ? (
+                                    <>
+                                      <div className="sticky top-0 z-10 border-b border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-text/60">
+                                        Non-Billable
+                                      </div>
+                                      {taskGroups.nonBillable.map((pt) => (
+                                        <button
+                                          key={pt.id}
+                                          type="button"
+                                          onClick={() => {
+                                            setProjectTaskId(pt.id);
+                                            setTaskMenuOpen(false);
+                                          }}
+                                          className={`block w-full px-3 py-2 text-left text-sm transition hover:bg-bg ${
+                                            pt.id === projectTaskId
+                                              ? 'bg-primary-soft/40 font-semibold text-primary'
+                                              : 'text-text'
+                                          }`}
+                                        >
+                                          {pt.task_name}
+                                        </button>
+                                      ))}
+                                    </>
+                                  ) : null}
+                                </>
                               )}
                             </div>
                           </>
@@ -2920,12 +3044,18 @@ export default function DashboardPage() {
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-slate-50/60 px-4 py-4 sm:px-6">
                   <div>
                     <h3 className="font-heading text-xl font-bold text-text">
-                      {view === 'week' ? "This week's entries" : `${primary}'s entries`}
+                      {view === 'custom'
+                        ? 'Custom range entries'
+                        : view === 'week'
+                          ? "This week's entries"
+                          : `${primary}'s entries`}
                     </h3>
                     <p className="mt-1 text-base font-medium text-text/70">
-                      {view === 'week'
-                        ? `${weekDays[0].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekDays[6].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                        : secondary}
+                      {view === 'custom'
+                        ? `${new Date(customStart + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} – ${new Date(customEnd + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                        : view === 'week'
+                          ? `${weekDays[0].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekDays[6].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                          : secondary}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-4 text-right sm:gap-5">
@@ -2934,23 +3064,59 @@ export default function DashboardPage() {
                         Total
                       </p>
                       <p className="font-mono text-2xl font-bold tabular-nums text-primary">
-                        {formatHours(view === 'week' ? weekTotal : dayTotal)}
+                        {formatHours(view === 'custom' ? rangeTotal : view === 'week' ? weekTotal : dayTotal)}
                       </p>
                     </div>
-                    <div className="h-12 w-px bg-slate-200" />
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-accent-dark">
-                        Billable
-                      </p>
-                      <p className="font-mono text-2xl font-bold tabular-nums text-accent-dark">
-                        {formatHours(view === 'week' ? weekBillable : dayBillable)}
-                      </p>
-                    </div>
+                    {showBillableHours ? (
+                      <>
+                        <div className="h-12 w-px bg-slate-200" />
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-wider text-accent-dark">
+                            Billable
+                          </p>
+                          <p className="font-mono text-2xl font-bold tabular-nums text-accent-dark">
+                            {formatHours(view === 'custom' ? rangeBillable : view === 'week' ? weekBillable : dayBillable)}
+                          </p>
+                        </div>
+                      </>
+                    ) : null}
                   </div>
                 </div>
 
                 {entriesLoading ? (
                   <div className="px-5 py-12 text-center text-sm text-muted">Loading entries…</div>
+                ) : view === 'custom' ? (
+                  rangeEntries.length === 0 ? (
+                    <div className="px-5 py-12 text-center">
+                      <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-primary-soft">
+                        <Clock className="h-7 w-7 text-primary" />
+                      </span>
+                      <p className="mt-4 text-sm text-muted">
+                        No entries in this date range.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="max-h-[640px] overflow-y-auto">
+                      <ul className="divide-y divide-slate-100">
+                        {rangeEntries.map((entry) => (
+                          <EntryRow
+                            key={entry.id}
+                            entry={entry}
+                            editingId={editingId}
+                            tickNow={tickNow}
+                            timerBusy={timerBusy}
+                            locked={weekIsLocked}
+                            hasRunningTimer={runningEntry !== null}
+                            onEdit={handleEdit}
+                            onDelete={handleDelete}
+                            onStop={handleStopTimer}
+                            onStartFromRow={handleStartFromRow}
+                            showDate
+                          />
+                        ))}
+                      </ul>
+                    </div>
+                  )
                 ) : view === 'week' ? (
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[820px] border-collapse text-base">
@@ -3202,16 +3368,21 @@ export default function DashboardPage() {
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/40 px-5 py-3.5">
                   <p className="text-sm font-medium text-text/80">
-                    {view === 'week'
-                      ? `${weekEntries.filter((e) => e.user_id === effectiveUserId).length} ${weekEntries.filter((e) => e.user_id === effectiveUserId).length === 1 ? 'entry' : 'entries'} this week`
-                      : `${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'} on ${secondary}`}
+                    {view === 'custom'
+                      ? `${rangeEntries.length} ${rangeEntries.length === 1 ? 'entry' : 'entries'} in range`
+                      : view === 'week'
+                        ? `${weekEntries.filter((e) => e.user_id === effectiveUserId).length} ${weekEntries.filter((e) => e.user_id === effectiveUserId).length === 1 ? 'entry' : 'entries'} this week`
+                        : `${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'} on ${secondary}`}
                   </p>
-                  <p className="text-sm font-medium text-text/80">{weekDays.length} days this week</p>
+                  {view !== 'custom' ? (
+                    <p className="text-sm font-medium text-text/80">{weekDays.length} days this week</p>
+                  ) : null}
                 </div>
               </section>
             </div>
 
-            {/* Inline submit row — replaces the old sticky footer */}
+            {/* Inline submit row — replaces the old sticky footer. Hidden in Custom view (not anchored to a week). */}
+            {view !== 'custom' ? (
             <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-6">
               <div className="flex flex-wrap items-center gap-4 sm:gap-6">
                 <div>
@@ -3231,15 +3402,19 @@ export default function DashboardPage() {
                     {formatHours(weekTotal)}
                   </p>
                 </div>
-                <div className="h-12 w-px bg-slate-200" />
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-accent-dark">
-                    Billable
-                  </p>
-                  <p className="mt-0.5 font-mono text-xl font-bold text-accent-dark tabular-nums">
-                    {formatHours(weekBillable)}
-                  </p>
-                </div>
+                {showBillableHours ? (
+                  <>
+                    <div className="h-12 w-px bg-slate-200" />
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-accent-dark">
+                        Billable
+                      </p>
+                      <p className="mt-0.5 font-mono text-xl font-bold text-accent-dark tabular-nums">
+                        {formatHours(weekBillable)}
+                      </p>
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               <div className="relative">
@@ -3281,6 +3456,7 @@ export default function DashboardPage() {
                 )}
               </div>
             </div>
+            ) : null}
           </>
         )}
       </main>

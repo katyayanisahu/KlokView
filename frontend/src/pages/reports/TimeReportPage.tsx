@@ -27,6 +27,9 @@ import {
   TIME_TEAM,
   TIME_TOTALS,
 } from '@/mock/reportsData';
+import { useAuthStore } from '@/store/authStore';
+import { useAccountSettingsStore } from '@/store/accountSettingsStore';
+import { formatCurrency } from '@/utils/format';
 
 interface ClientView {
   id: number;
@@ -125,6 +128,11 @@ const SUB_VIEWS: { key: SubView; label: string }[] = [
 ];
 
 export default function TimeReportPage() {
+  const user = useAuthStore((s) => s.user);
+  const isMember = user?.role === 'member';
+  // Subscribe so formatCurrency picks up workspace preference changes.
+  useAccountSettingsStore((s) => s.settings?.currency);
+  useAccountSettingsStore((s) => s.settings?.number_format);
   const [period, setPeriod] = useState<Period>('week');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [subView, setSubView] = useState<SubView>('clients');
@@ -450,21 +458,31 @@ export default function TimeReportPage() {
     if (drilldownProject && projectTaskBreakdown.length > 0) {
       const rows: (string | number)[][] = [];
       projectTaskBreakdown.forEach((task) => {
-        rows.push([task.name, '', task.hours, task.billable_hours, '', '']);
+        if (isMember) {
+          rows.push([task.name, '', task.hours, task.billable_hours]);
+        } else {
+          rows.push([task.name, '', task.hours, task.billable_hours, '', '']);
+        }
         task.members.forEach((m) => {
-          rows.push([
-            task.name,
-            m.name,
-            m.hours,
-            m.billable_hours,
-            m.rate,
-            m.billable_amount,
-          ]);
+          if (isMember) {
+            rows.push([task.name, m.name, m.hours, m.billable_hours]);
+          } else {
+            rows.push([
+              task.name,
+              m.name,
+              m.hours,
+              m.billable_hours,
+              m.rate,
+              m.billable_amount,
+            ]);
+          }
         });
       });
       downloadCsv({
         filename: timestampedFilename(`time_${drilldownProject.name.replace(/\s+/g, '-')}`),
-        headers: ['Task', 'Member', 'Hours', 'Billable hours', 'Rate', 'Billable amount'],
+        headers: isMember
+          ? ['Task', 'Member', 'Hours', 'Billable hours']
+          : ['Task', 'Member', 'Hours', 'Billable hours', 'Rate', 'Billable amount'],
         rows,
       });
       return;
@@ -632,7 +650,7 @@ export default function TimeReportPage() {
           : drilldownClient
             ? clientTotals
             : totals;
-        const showMoneyKpis = !!drilldownProject || !!drilldownClient;
+        const showMoneyKpis = (!!drilldownProject || !!drilldownClient) && !isMember;
         if (!activeTotals) return null;
         return (
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -656,7 +674,7 @@ export default function TimeReportPage() {
                     Billable amount
                   </p>
                   <p className="mt-2 font-heading text-3xl font-bold text-text">
-                    ${activeTotals.billableAmount.toFixed(2)}
+                    {formatCurrency(activeTotals.billableAmount)}
                   </p>
                   <p className="mt-1 text-xs text-muted">
                     Billable hours × project rate
@@ -790,9 +808,10 @@ export default function TimeReportPage() {
                 rows={projectTaskBreakdown}
                 loading={projectReport === null}
                 hoursLink={hoursLink}
+                hideAmount={isMember}
               />
             ) : (
-              <TeamTable rows={projectScopedTeam} hoursLink={hoursLink} />
+              <TeamTable rows={projectScopedTeam} hoursLink={hoursLink} hideAmount={isMember} />
             )
           ) : drilldownClient ? (
             drilldownSubView === 'projects' ? (
@@ -801,28 +820,31 @@ export default function TimeReportPage() {
                 totalHours={clientTotals?.totalHours ?? drilldownClient.hours}
                 onDrill={(id) => setDrilldownProjectId(id)}
                 hoursLink={hoursLink}
+                hideAmount={isMember}
               />
             ) : drilldownSubView === 'tasks' ? (
-              <TasksTable rows={clientScopedTasks} hoursLink={hoursLink} />
+              <TasksTable rows={clientScopedTasks} hoursLink={hoursLink} hideAmount={isMember} />
             ) : (
-              <TeamTable rows={clientScopedTeam} hoursLink={hoursLink} />
+              <TeamTable rows={clientScopedTeam} hoursLink={hoursLink} hideAmount={isMember} />
             )
           ) : subView === 'clients' ? (
             <ClientsTable
               rows={clientsData}
               onDrill={(id) => setDrilldownClientId(id)}
               hoursLink={hoursLink}
+              hideAmount={isMember}
             />
           ) : subView === 'projects' ? (
             <ProjectsTable
               rows={projectsData}
               onDrill={(id) => setDrilldownProjectId(id)}
               hoursLink={hoursLink}
+              hideAmount={isMember}
             />
           ) : subView === 'tasks' ? (
-            <TasksTable rows={tasksData} hoursLink={hoursLink} />
+            <TasksTable rows={tasksData} hoursLink={hoursLink} hideAmount={isMember} />
           ) : (
-            <TeamTable rows={teamData} hoursLink={hoursLink} />
+            <TeamTable rows={teamData} hoursLink={hoursLink} hideAmount={isMember} />
           )}
         </div>
       </section>
@@ -848,10 +870,12 @@ function ClientsTable({
   rows,
   onDrill,
   hoursLink,
+  hideAmount,
 }: {
   rows: ClientView[];
   onDrill: (id: number) => void;
   hoursLink: HoursLinkBuilder;
+  hideAmount?: boolean;
 }) {
   const total = rows.reduce(
     (acc, c) => ({
@@ -869,7 +893,7 @@ function ClientsTable({
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>
-          <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>
+          {!hideAmount && <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>}
         </tr>
       </thead>
       <tbody>
@@ -900,9 +924,11 @@ function ClientsTable({
               <td className="px-4 py-3 text-text">
                 {formatHours(c.billableHours)} <span className="text-muted">({billablePct}%)</span>
               </td>
-              <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
-                ${c.billableAmount.toFixed(2)}
-              </td>
+              {!hideAmount && (
+                <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
+                  {formatCurrency(c.billableAmount)}
+                </td>
+              )}
             </tr>
           );
         })}
@@ -910,7 +936,9 @@ function ClientsTable({
           <td className="px-4 py-3 sm:px-5">Total</td>
           <td className="px-4 py-3">{formatHours(total.hours)}</td>
           <td className="px-4 py-3">{formatHours(total.billableHours)}</td>
-          <td className="px-4 py-3 text-right sm:px-5">${total.billableAmount.toFixed(2)}</td>
+          {!hideAmount && (
+            <td className="px-4 py-3 text-right sm:px-5">{formatCurrency(total.billableAmount)}</td>
+          )}
         </tr>
       </tbody>
     </table>
@@ -921,10 +949,12 @@ function ProjectsTable({
   rows,
   onDrill,
   hoursLink,
+  hideAmount,
 }: {
   rows: ProjectView[];
   onDrill?: (id: number) => void;
   hoursLink: HoursLinkBuilder;
+  hideAmount?: boolean;
 }) {
   if (rows.length === 0) return <EmptyTimeRow />;
   const total = rows.reduce(
@@ -942,7 +972,7 @@ function ProjectsTable({
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>
-          <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>
+          {!hideAmount && <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>}
         </tr>
       </thead>
       <tbody>
@@ -978,9 +1008,11 @@ function ProjectsTable({
               <td className="px-4 py-3 text-text">
                 {formatHours(p.billableHours)} <span className="text-muted">({billablePct}%)</span>
               </td>
-              <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
-                ${p.billableAmount.toFixed(2)}
-              </td>
+              {!hideAmount && (
+                <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
+                  {formatCurrency(p.billableAmount)}
+                </td>
+              )}
             </tr>
           );
         })}
@@ -988,14 +1020,24 @@ function ProjectsTable({
           <td className="px-4 py-3 sm:px-5">Total</td>
           <td className="px-4 py-3">{formatHours(total.hours)}</td>
           <td className="px-4 py-3">{formatHours(total.billable)}</td>
-          <td className="px-4 py-3 text-right sm:px-5">${total.amount.toFixed(2)}</td>
+          {!hideAmount && (
+            <td className="px-4 py-3 text-right sm:px-5">{formatCurrency(total.amount)}</td>
+          )}
         </tr>
       </tbody>
     </table>
   );
 }
 
-function TasksTable({ rows, hoursLink }: { rows: TaskView[]; hoursLink: HoursLinkBuilder }) {
+function TasksTable({
+  rows,
+  hoursLink,
+  hideAmount,
+}: {
+  rows: TaskView[];
+  hoursLink: HoursLinkBuilder;
+  hideAmount?: boolean;
+}) {
   if (rows.length === 0) return <EmptyTimeRow />;
   const total = rows.reduce(
     (acc, t) => ({
@@ -1012,7 +1054,7 @@ function TasksTable({ rows, hoursLink }: { rows: TaskView[]; hoursLink: HoursLin
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>
-          <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>
+          {!hideAmount && <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>}
         </tr>
       </thead>
       <tbody>
@@ -1040,9 +1082,11 @@ function TasksTable({ rows, hoursLink }: { rows: TaskView[]; hoursLink: HoursLin
               <td className="px-4 py-3 text-text">
                 {formatHours(t.billableHours)} <span className="text-muted">({billablePct}%)</span>
               </td>
-              <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
-                ${t.billableAmount.toFixed(2)}
-              </td>
+              {!hideAmount && (
+                <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
+                  {formatCurrency(t.billableAmount)}
+                </td>
+              )}
             </tr>
           );
         })}
@@ -1050,14 +1094,24 @@ function TasksTable({ rows, hoursLink }: { rows: TaskView[]; hoursLink: HoursLin
           <td className="px-4 py-3 sm:px-5">Total</td>
           <td className="px-4 py-3">{formatHours(total.hours)}</td>
           <td className="px-4 py-3">{formatHours(total.billable)}</td>
-          <td className="px-4 py-3 text-right sm:px-5">${total.amount.toFixed(2)}</td>
+          {!hideAmount && (
+            <td className="px-4 py-3 text-right sm:px-5">{formatCurrency(total.amount)}</td>
+          )}
         </tr>
       </tbody>
     </table>
   );
 }
 
-function TeamTable({ rows, hoursLink }: { rows: TeamView[]; hoursLink: HoursLinkBuilder }) {
+function TeamTable({
+  rows,
+  hoursLink,
+  hideAmount,
+}: {
+  rows: TeamView[];
+  hoursLink: HoursLinkBuilder;
+  hideAmount?: boolean;
+}) {
   if (rows.length === 0) return <EmptyTimeRow />;
   const total = rows.reduce(
     (acc, m) => ({
@@ -1075,7 +1129,7 @@ function TeamTable({ rows, hoursLink }: { rows: TeamView[]; hoursLink: HoursLink
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Utilization</th>
           <th className="px-4 py-3">Billable hours</th>
-          <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>
+          {!hideAmount && <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>}
         </tr>
       </thead>
       <tbody>
@@ -1103,9 +1157,11 @@ function TeamTable({ rows, hoursLink }: { rows: TeamView[]; hoursLink: HoursLink
               <td className="px-4 py-3 text-text">
                 {formatHours(m.billableHours)} <span className="text-muted">({billablePct}%)</span>
               </td>
-              <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
-                ${m.billableAmount.toFixed(2)}
-              </td>
+              {!hideAmount && (
+                <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
+                  {formatCurrency(m.billableAmount)}
+                </td>
+              )}
             </tr>
           );
         })}
@@ -1114,7 +1170,9 @@ function TeamTable({ rows, hoursLink }: { rows: TeamView[]; hoursLink: HoursLink
           <td className="px-4 py-3">{formatHours(total.hours)}</td>
           <td className="px-4 py-3" />
           <td className="px-4 py-3">{formatHours(total.billable)}</td>
-          <td className="px-4 py-3 text-right sm:px-5">${total.amount.toFixed(2)}</td>
+          {!hideAmount && (
+            <td className="px-4 py-3 text-right sm:px-5">{formatCurrency(total.amount)}</td>
+          )}
         </tr>
       </tbody>
     </table>
@@ -1134,11 +1192,13 @@ function DrilldownProjectsTable({
   totalHours,
   onDrill,
   hoursLink,
+  hideAmount,
 }: {
   rows: ProjectView[];
   totalHours: number;
   onDrill?: (id: number) => void;
   hoursLink: HoursLinkBuilder;
+  hideAmount?: boolean;
 }) {
   const totalBillable = rows.reduce((acc, r) => acc + r.billableHours, 0);
   const totalAmount = rows.reduce((acc, r) => acc + r.billableAmount, 0);
@@ -1149,7 +1209,7 @@ function DrilldownProjectsTable({
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>
-          <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>
+          {!hideAmount && <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>}
         </tr>
       </thead>
       <tbody>
@@ -1189,9 +1249,11 @@ function DrilldownProjectsTable({
               <td className="px-4 py-3 text-text">
                 {formatHours(p.billableHours)} <span className="text-muted">({billablePct}%)</span>
               </td>
-              <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
-                ${p.billableAmount.toFixed(2)}
-              </td>
+              {!hideAmount && (
+                <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
+                  {formatCurrency(p.billableAmount)}
+                </td>
+              )}
             </tr>
           );
         })}
@@ -1199,7 +1261,9 @@ function DrilldownProjectsTable({
           <td className="px-4 py-3 sm:px-5">Total</td>
           <td className="px-4 py-3">{formatHours(totalHours)}</td>
           <td className="px-4 py-3">{formatHours(totalBillable)}</td>
-          <td className="px-4 py-3 text-right sm:px-5">${totalAmount.toFixed(2)}</td>
+          {!hideAmount && (
+            <td className="px-4 py-3 text-right sm:px-5">{formatCurrency(totalAmount)}</td>
+          )}
         </tr>
       </tbody>
     </table>
@@ -1210,10 +1274,12 @@ function ProjectTaskBreakdownTable({
   rows,
   loading,
   hoursLink,
+  hideAmount,
 }: {
   rows: TaskBreakdownRow[];
   loading: boolean;
   hoursLink: HoursLinkBuilder;
+  hideAmount?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
@@ -1258,8 +1324,8 @@ function ProjectTaskBreakdownTable({
           <th className="px-4 py-3 sm:px-5">Name</th>
           <th className="px-4 py-3">Hours</th>
           <th className="px-4 py-3">Billable hours</th>
-          <th className="px-4 py-3">Rate</th>
-          <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>
+          {!hideAmount && <th className="px-4 py-3">Rate</th>}
+          {!hideAmount && <th className="px-4 py-3 text-right sm:px-5">Billable amount</th>}
         </tr>
       </thead>
       <tbody>
@@ -1307,10 +1373,12 @@ function ProjectTaskBreakdownTable({
                   {formatHours(Number.parseFloat(task.billable_hours) || 0)}{' '}
                   <span className="text-muted">({task.billable_percent}%)</span>
                 </td>
-                <td className="px-4 py-3 text-text">—</td>
-                <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
-                  ${taskAmount.toFixed(2)}
-                </td>
+                {!hideAmount && <td className="px-4 py-3 text-text">—</td>}
+                {!hideAmount && (
+                  <td className="px-4 py-3 text-right font-semibold text-text sm:px-5">
+                    {formatCurrency(taskAmount)}
+                  </td>
+                )}
               </tr>
               {isOpen
                 ? task.members.map((m) => (
@@ -1335,12 +1403,16 @@ function ProjectTaskBreakdownTable({
                         {formatHours(Number.parseFloat(m.billable_hours) || 0)}{' '}
                         <span className="text-muted">({m.billable_percent}%)</span>
                       </td>
-                      <td className="px-4 py-3 text-text">
-                        ${Number.parseFloat(m.rate || '0').toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-text sm:px-5">
-                        ${Number.parseFloat(m.billable_amount || '0').toFixed(2)}
-                      </td>
+                      {!hideAmount && (
+                        <td className="px-4 py-3 text-text">
+                          {formatCurrency(m.rate || '0')}
+                        </td>
+                      )}
+                      {!hideAmount && (
+                        <td className="px-4 py-3 text-right text-text sm:px-5">
+                          {formatCurrency(m.billable_amount || '0')}
+                        </td>
+                      )}
                     </tr>
                   ))
                 : null}
@@ -1351,8 +1423,10 @@ function ProjectTaskBreakdownTable({
           <td className="px-4 py-3 sm:px-5">Total</td>
           <td className="px-4 py-3">{formatHours(totals.hours)}</td>
           <td className="px-4 py-3">{formatHours(totals.billable)}</td>
-          <td className="px-4 py-3" />
-          <td className="px-4 py-3 text-right sm:px-5">${totals.amount.toFixed(2)}</td>
+          {!hideAmount && <td className="px-4 py-3" />}
+          {!hideAmount && (
+            <td className="px-4 py-3 text-right sm:px-5">{formatCurrency(totals.amount)}</td>
+          )}
         </tr>
       </tbody>
     </table>

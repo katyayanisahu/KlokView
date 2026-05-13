@@ -34,6 +34,12 @@ import { listUsers } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 import { extractApiError } from '@/utils/errors';
 import { formatBudget, formatCurrency, PROJECT_TYPE_LABEL } from '@/utils/format';
+import {
+  RANGE_LABEL,
+  type RangeKey,
+  computeRangeDates,
+  formatDateRangeLabel,
+} from '@/utils/dateRanges';
 import { useAccountSettingsStore } from '@/store/accountSettingsStore';
 import type { ProjectListItem, User } from '@/types';
 
@@ -91,6 +97,12 @@ export default function ProjectsListPage() {
   const [search, setSearch] = useState('');
   const [clientFilter, setClientFilter] = useState<number | 'all'>('all');
   const [managerFilter, setManagerFilter] = useState<number | 'all'>('all');
+  // Period filter — controls the Spent column for each project row. Lifetime
+  // by default (matches Harvest's portfolio overview); switch to Week/Month/
+  // Custom to see period-scoped Spent for cross-project comparisons.
+  const [period, setPeriod] = useState<RangeKey>('all_time');
+  const [periodCustomStart, setPeriodCustomStart] = useState<string>('');
+  const [periodCustomEnd, setPeriodCustomEnd] = useState<string>('');
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [pinned, setPinned] = useState<Set<number>>(() => loadPinned());
 
@@ -107,6 +119,14 @@ export default function ProjectsListPage() {
       .catch(() => setUsers([]));
   }, []);
 
+  // Build the period filter params. 'all_time' falls through with no
+  // start/end so backend keeps the lifetime Sum (cheaper, indexable).
+  const periodParams = useMemo(() => {
+    if (period === 'all_time') return {} as const;
+    const { start, end } = computeRangeDates(period, periodCustomStart, periodCustomEnd);
+    return { start_date: start, end_date: end } as const;
+  }, [period, periodCustomStart, periodCustomEnd]);
+
   const refresh = () => {
     setLoading(true);
     setError(null);
@@ -115,6 +135,7 @@ export default function ProjectsListPage() {
       search: search.trim() || undefined,
       client_id: clientFilter === 'all' ? undefined : clientFilter,
       manager_id: managerFilter === 'all' ? undefined : managerFilter,
+      ...periodParams,
     })
       .then((res) => setProjects(res.results))
       .catch((err) => setError(extractApiError(err, 'Failed to load projects')))
@@ -130,6 +151,7 @@ export default function ProjectsListPage() {
       search: search.trim() || undefined,
       client_id: clientFilter === 'all' ? undefined : clientFilter,
       manager_id: managerFilter === 'all' ? undefined : managerFilter,
+      ...periodParams,
     })
       .then((res) => {
         if (!cancelled) {
@@ -146,7 +168,7 @@ export default function ProjectsListPage() {
     return () => {
       cancelled = true;
     };
-  }, [status, search, clientFilter, managerFilter]);
+  }, [status, search, clientFilter, managerFilter, periodParams]);
 
   const toggleOne = (id: number) => {
     setSelectedIds((prev) => {
@@ -348,7 +370,8 @@ export default function ProjectsListPage() {
     budgeted: projects.filter((p) => p.budget_type !== 'none').length,
   };
 
-  const filterChipsActive = clientFilter !== 'all' || managerFilter !== 'all';
+  const filterChipsActive =
+    clientFilter !== 'all' || managerFilter !== 'all' || period !== 'all_time';
 
   return (
     <div className="min-h-screen bg-bg">
@@ -535,12 +558,54 @@ export default function ProjectsListPage() {
               disabled={hasSelection}
             />
           ) : null}
+          <ChipSelect<RangeKey>
+            label="Period"
+            value={period}
+            onChange={(v) => setPeriod(v)}
+            options={(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => ({
+              value: k,
+              label: RANGE_LABEL[k],
+            }))}
+            disabled={hasSelection}
+            defaultValue="all_time"
+          />
+          {period === 'custom' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                value={periodCustomStart}
+                max={periodCustomEnd || undefined}
+                onChange={(e) => setPeriodCustomStart(e.target.value)}
+                className="input w-auto py-1.5 text-sm"
+                aria-label="Custom start date"
+              />
+              <span className="text-sm font-medium text-muted">to</span>
+              <input
+                type="date"
+                value={periodCustomEnd}
+                min={periodCustomStart || undefined}
+                onChange={(e) => setPeriodCustomEnd(e.target.value)}
+                className="input w-auto py-1.5 text-sm"
+                aria-label="Custom end date"
+              />
+            </div>
+          ) : period !== 'all_time' ? (
+            <span className="text-xs text-muted">
+              {formatDateRangeLabel(
+                computeRangeDates(period).start,
+                computeRangeDates(period).end,
+              )}
+            </span>
+          ) : null}
           {filterChipsActive && !hasSelection ? (
             <button
               type="button"
               onClick={() => {
                 setClientFilter('all');
                 setManagerFilter('all');
+                setPeriod('all_time');
+                setPeriodCustomStart('');
+                setPeriodCustomEnd('');
               }}
               className="text-xs font-medium text-primary hover:underline"
             >
@@ -709,22 +774,27 @@ export default function ProjectsListPage() {
   );
 }
 
-function ChipSelect<T extends number | 'all'>({
+function ChipSelect<T extends number | string>({
   label,
   value,
   onChange,
   options,
   disabled,
+  defaultValue,
 }: {
   label: string;
   value: T;
   onChange: (v: T) => void;
   options: Array<{ value: T; label: string }>;
   disabled?: boolean;
+  // Value considered "default / unfiltered" for highlight styling. Falls back
+  // to 'all' so existing Client/Manager chips keep working unchanged.
+  defaultValue?: T;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.value === value);
-  const isActive = value !== 'all';
+  const unset: T = defaultValue ?? ('all' as T);
+  const isActive = value !== unset;
 
   return (
     <div className="relative w-full sm:w-auto">

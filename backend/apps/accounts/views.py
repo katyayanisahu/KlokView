@@ -704,6 +704,13 @@ class UserListView(APIView):
         detail = request.query_params.get('detail')
 
         qs = User.objects.filter(account_id=request.user.account_id)
+        if request.user.role not in ('owner', 'admin'):
+            # Non-admins only see teammates on projects they share (plus self).
+            from apps.projects.models import ProjectMembership
+            shared_user_ids = ProjectMembership.objects.filter(
+                project__memberships__user=request.user,
+            ).values_list('user_id', flat=True)
+            qs = qs.filter(models.Q(id=request.user.id) | models.Q(id__in=shared_user_ids))
         if not include_pending and not include_archived:
             qs = qs.filter(is_active=True)
         elif include_pending and not include_archived:

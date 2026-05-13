@@ -1,0 +1,19 @@
+{
+  "name": "klokview-glance-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Custom UI bundle for KlokView jira:issueGlance — renders the time-tracker panel inside Jira's Details sidebar (Harvest-style).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@forge/bridge": "^4.5.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.10"
+  }
+}

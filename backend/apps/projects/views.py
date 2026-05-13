@@ -76,6 +76,9 @@ class TaskViewSet(TenantScopedMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        user = self.request.user
+        if user.is_authenticated and user.role not in ('owner', 'admin'):
+            qs = qs.filter(project_tasks__project__memberships__user=user).distinct()
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() in ('true', '1', 'yes'))
@@ -120,6 +123,9 @@ class ProjectViewSet(TenantScopedMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        user = self.request.user
+        if user.is_authenticated and user.role not in ('owner', 'admin'):
+            qs = qs.filter(memberships__user=user).distinct()
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() in ('true', '1', 'yes'))
@@ -143,9 +149,19 @@ class ProjectViewSet(TenantScopedMixin, viewsets.ModelViewSet):
                 | Q(client__name__icontains=search)
             )
         if self.action == 'list':
+            # Optional period filter for the Spent column. When start/end are
+            # absent, the Sum runs across all time entries (lifetime).
+            start_date = self.request.query_params.get('start_date')
+            end_date = self.request.query_params.get('end_date')
+            time_filter = Q()
+            if start_date:
+                time_filter &= Q(time_entries__date__gte=start_date)
+            if end_date:
+                time_filter &= Q(time_entries__date__lte=end_date)
             qs = qs.annotate(
                 spent_hours=Coalesce(
-                    Sum('time_entries__hours'),
+                    Sum('time_entries__hours', filter=time_filter) if time_filter
+                    else Sum('time_entries__hours'),
                     Value(Decimal('0')),
                     output_field=DecimalField(max_digits=12, decimal_places=2),
                 ),

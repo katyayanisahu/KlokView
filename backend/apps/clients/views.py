@@ -19,6 +19,9 @@ class ClientViewSet(TenantScopedMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        user = self.request.user
+        if user.is_authenticated and user.role not in ('owner', 'admin'):
+            qs = qs.filter(projects__memberships__user=user).distinct()
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() in ('true', '1', 'yes'))
@@ -50,6 +53,8 @@ class ClientContactViewSet(viewsets.ModelViewSet):
         if not (user and user.is_authenticated):
             return qs.none()
         qs = qs.filter(client__account_id=user.account_id)
+        if user.role not in ('owner', 'admin'):
+            qs = qs.filter(client__projects__memberships__user=user).distinct()
         client_id = self.request.query_params.get('client')
         if client_id:
             qs = qs.filter(client_id=client_id)

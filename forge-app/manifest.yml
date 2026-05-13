@@ -10,6 +10,18 @@
 #   Production:  forge deploy && forge install --site <yoursite>.atlassian.net
 
 modules:
+  # Primary entry point — clickable "Open KlokView" label in the issue Details
+  # sidebar (Harvest-style). Custom UI bundle lives under static/glance/build.
+  jira:issueGlance:
+    - key: klokview-time-tracking-glance
+      resource: glance
+      resolver:
+        function: resolver
+      title: KlokView Time Tracking
+      label: Open KlokView
+      icon: https://developer.atlassian.com/platform/forge/images/icons/issue-panel-icon.svg
+  # Backup entry points: issuePanel for classic Jira UI + issueAction for the
+  # issue "..." menu. Both use the @forge/react UI Kit 2 bundle in src/index.jsx.
   jira:issuePanel:
     - key: klokview-time-tracking-panel
       resource: main
@@ -18,6 +30,13 @@ modules:
       render: native
       title: KlokView Time Tracking
       icon: https://developer.atlassian.com/platform/forge/images/icons/issue-panel-icon.svg
+  jira:issueAction:
+    - key: klokview-time-tracking-action
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: KlokView Time Tracking
   function:
     - key: resolver
       handler: resolvers.handler
@@ -25,6 +44,8 @@ modules:
 resources:
   - key: main
     path: src/index.jsx
+  - key: glance
+    path: static/glance/build
 
 app:
   id: ari:cloud:ecosystem::app/26b4d13e-82a2-4e4c-a93f-34cddfdab857
@@ -38,9 +59,10 @@ permissions:
   external:
     fetch:
       backend:
-        # Dev URL — `npx localtunnel --port 8000` gives a fresh https URL each
-        # restart. Update both this list and src/resolvers.js when it changes.
-        - https://mailing-closing-until-district.trycloudflare.com
+        # Dev URL — `cloudflared tunnel --url http://localhost:8000` gives a
+        # fresh https URL each restart. Update both this list AND
+        # src/resolvers.js when it changes, then run `forge deploy`.
+        - https://falls-angela-iii-anticipated.trycloudflare.com
   scopes:
     - read:jira-work
     - read:jira-user

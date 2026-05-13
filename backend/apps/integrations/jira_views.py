@@ -58,6 +58,60 @@ from .jira_auth import JiraJWTAuthentication
 from .models import JiraConnection
 
 
+def _resolve_connection(request) -> JiraConnection | None:
+    """Resolve which JiraConnection a Forge call belongs to.
+
+    Two strategies:
+    1. **Production** — Atlassian Connect/Forge sends a signed JWT. We let
+       JiraJWTAuthentication verify it; if it succeeds, `request.auth` is the
+       connection.
+    2. **Dev (forge tunnel)** — no signed JWT, so the Forge resolver passes
+       `cloud_id` (Atlassian site's stable id) in the body or query. We look
+       it up directly. Safe because in dev each workspace owns its own tunnel
+       URL.
+    """
+    if isinstance(getattr(request, 'auth', None), JiraConnection):
+        return request.auth
+    cloud_id = ''
+    if hasattr(request, 'data') and isinstance(request.data, dict):
+        cloud_id = (request.data.get('cloud_id') or '').strip()
+    if not cloud_id and hasattr(request, 'query_params'):
+        cloud_id = (request.query_params.get('cloud_id') or '').strip()
+    if not cloud_id:
+        return None
+    return JiraConnection.objects.filter(client_key=cloud_id).first()
+
+
+def _resolve_effective_user(request, conn: JiraConnection):
+    """Pick which KlokView user this Forge call should act as.
+
+    Order:
+    1. **Email match** — Forge passes `jira_email` (the calling Jira user's
+       email from `/rest/api/3/myself`). If a KlokView User has the same email
+       in the connection's workspace, use them. This means each Jira user
+       transparently logs to *their own* KlokView account, no manual mapping.
+    2. **Fallback** — `JiraConnection.default_user` (the auto-picked owner/
+       admin from bootstrap). Used when the Jira user isn't found in KlokView,
+       or when the panel can't read the email (Atlassian privacy settings).
+    """
+    if conn is None:
+        return None
+
+    jira_email = ''
+    if hasattr(request, 'data') and isinstance(request.data, dict):
+        jira_email = (request.data.get('jira_email') or '').strip()
+    if not jira_email and hasattr(request, 'query_params'):
+        jira_email = (request.query_params.get('jira_email') or '').strip()
+
+    if jira_email and conn.account_id:
+        match = User.objects.filter(
+            email__iexact=jira_email, account_id=conn.account_id,
+        ).first()
+        if match is not None:
+            return match
+    return conn.default_user
+
+
 # ---------- 1. Atlassian install lifecycle (unauthenticated) ----------
 
 @csrf_exempt
@@ -122,19 +176,12 @@ def jira_uninstalled(request):
 # ---------- 2. Forge panel endpoints (Jira JWT auth) ----------
 
 class JiraEntriesView(APIView):
-    """GET /api/integrations/jira/entries/?issue_key=SCRUM-5
+    """GET /api/integrations/jira/entries/?issue_key=SCRUM-5&cloud_id=XYZ
 
     Returns KlokView time entries already logged against this Jira issue.
-    This is the "event log" the Forge panel renders inside the issue, just
-    like the Harvest panel.
-
-    Auth strategy (v1):
-    - If a `JiraConnection` is claimed by an account, scope entries to that
-      account. The Forge tunnel does NOT send a real Jira JWT in dev, so we
-      can't verify a signed token — instead, we trust the request locally
-      and rely on the connection-table claim to determine scope.
-    - Production hardening: re-add JiraJWTAuthentication once the install
-      lifecycle webhook is wired (Atlassian Marketplace publish flow).
+    Scoped to the workspace tied to `cloud_id` (sent by the Forge resolver
+    from `context.cloudId`). Falls back to the first claimed connection when
+    cloud_id is absent (dev convenience).
     """
 
     authentication_classes = []
@@ -148,12 +195,11 @@ class JiraEntriesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Find any claimed Jira connection — that account scopes the result.
-        # In dev (no claim yet), return all matching entries across the
-        # workspace so the panel shows something useful.
-        conn = JiraConnection.objects.filter(account__isnull=False).first()
+        conn = _resolve_connection(request) or JiraConnection.objects.filter(
+            account__isnull=False,
+        ).first()
         qs = TimeEntry.objects.filter(jira_issue_key=issue_key)
-        if conn is not None:
+        if conn is not None and conn.account_id is not None:
             qs = qs.filter(account_id=conn.account_id)
 
         entries = qs.select_related(
@@ -163,21 +209,83 @@ class JiraEntriesView(APIView):
         return Response(TimeEntrySerializer(entries, many=True).data)
 
 
+class JiraProjectsView(APIView):
+    """GET /api/integrations/jira/projects/?cloud_id=XYZ
+
+    Returns the workspace's projects + their tasks for the Forge panel's
+    project/task picker. Scoped to the connection's `default_user` membership
+    when set, so users see only projects they're on.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        conn = _resolve_connection(request)
+        if conn is None or conn.account_id is None:
+            return Response({'projects': [], 'default_user_id': None, 'default_user_name': None})
+
+        # Pick the user whose memberships scope the project list. Prefer the
+        # calling Jira user (via email match); fall back to default_user when
+        # there's no KlokView account for that email.
+        effective_user = _resolve_effective_user(request, conn)
+
+        qs = Project.objects.filter(
+            account_id=conn.account_id,
+            is_active=True,
+        )
+        if effective_user is not None:
+            qs = qs.filter(memberships__user_id=effective_user.id)
+
+        qs = (
+            qs.select_related('client')
+            .prefetch_related('project_tasks__task')
+            .distinct()
+            .order_by('name')
+        )
+
+        projects_payload = [
+            {
+                'id': p.id,
+                'name': p.name,
+                'code': p.code,
+                'client_name': p.client.name if p.client_id else '',
+                'project_tasks': [
+                    {
+                        'id': pt.id,
+                        'task_id': pt.task_id,
+                        'name': pt.task.name,
+                        'is_billable': pt.is_billable,
+                    }
+                    for pt in p.project_tasks.all()
+                ],
+            }
+            for p in qs
+        ]
+        return Response({
+            'projects': projects_payload,
+            'default_user_id': effective_user.id if effective_user else None,
+            'default_user_name': effective_user.full_name if effective_user else None,
+            'default_user_role': effective_user.role if effective_user else None,
+        })
+
+
 class JiraStartView(APIView):
     """POST /api/integrations/jira/start/
 
-    Body: { issue_key, project_id, project_task_id, notes?, is_billable? }
+    Body: { cloud_id?, issue_key, project_id, project_task_id, notes?,
+            is_billable?, trackflow_user_id? }
 
-    The Forge panel must include project_id + project_task_id — v1 has no
-    Jira-issue → TrackFlow-project mapping table yet, so the panel asks the
-    user to pick once and persists the choice client-side.
+    Accepts either Atlassian-signed JWT (production) or `cloud_id` in body
+    (dev / forge tunnel). The acting TrackFlow user defaults to the
+    connection's `default_user` — override by passing `trackflow_user_id`.
     """
 
     authentication_classes = [JiraJWTAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):
-        conn: JiraConnection | None = request.auth
+        conn = _resolve_connection(request)
         if conn is None or conn.account_id is None:
             return Response(
                 {'detail': 'Jira site is not yet linked to a TrackFlow account.'},
@@ -203,14 +311,19 @@ class JiraStartView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # The Forge call doesn't carry a TrackFlow user identity; v1 logs
-        # entries against the Jira account-user mapping, which we don't have
-        # yet. Until that's wired up, require a `trackflow_user_id` on the
-        # body so the panel can post it explicitly.
-        tf_user_id = data.get('trackflow_user_id')
+        # Prefer explicit override, else email-resolved KlokView user, else
+        # workspace default. This makes Jira→KlokView attribution match the
+        # actual logged-in Jira user when their emails match.
+        effective_user = _resolve_effective_user(request, conn)
+        tf_user_id = (
+            data.get('trackflow_user_id')
+            or (effective_user.id if effective_user else None)
+            or conn.default_user_id
+        )
         if not tf_user_id:
             return Response(
-                {'detail': 'trackflow_user_id required (Forge → TrackFlow user mapping pending).'},
+                {'detail': 'No TrackFlow user mapped to this Jira connection. '
+                          'Set a default user from Settings → Integrations.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -247,14 +360,15 @@ class JiraStartView(APIView):
 class JiraStopView(APIView):
     """POST /api/integrations/jira/stop/
 
-    Body: { id }  — TrackFlow TimeEntry id to stop.
+    Body: { cloud_id?, id }  — TrackFlow TimeEntry id to stop. Accepts
+    either Atlassian JWT (production) or cloud_id (dev) for auth.
     """
 
     authentication_classes = [JiraJWTAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):
-        conn: JiraConnection | None = request.auth
+        conn = _resolve_connection(request)
         if conn is None or conn.account_id is None:
             return Response(
                 {'detail': 'Jira site is not linked.'},
@@ -428,12 +542,22 @@ def jira_bootstrap(request):
             conn.account = admin.account
             conn.save(update_fields=['default_user', 'account', 'updated_at'])
 
+    # Resolve the *calling* Jira user via email match (falls back to default
+    # if no KlokView account matches). The panel uses this to render
+    # "Logging as ..." accurately.
+    effective_user = _resolve_effective_user(request, conn)
+
     return Response({
         'connected': True,
         'connection_id': conn.id,
         'account_id': conn.account_id,
-        'default_user_id': conn.default_user_id,
+        'default_user_id': effective_user.id if effective_user else conn.default_user_id,
         'default_user_name': (
-            conn.default_user.full_name if conn.default_user else None
+            effective_user.full_name if effective_user
+            else (conn.default_user.full_name if conn.default_user else None)
+        ),
+        'default_user_role': (
+            effective_user.role if effective_user
+            else (conn.default_user.role if conn.default_user else None)
         ),
     })

@@ -101,6 +101,8 @@
 
 UI follows Harvest pattern (Day + Week views, underlined tabs). Project list / detail / dashboard tiles read real hours from `TimeEntry`.
 
+**Period dropdown (Day / Week / Custom):** Top-right of the Timesheet replaces the old Day/Week pill toggle. Day/Week behave as before. **Custom** swaps the prev/next/calendar with two date inputs and renders a flat chronological list of entries across the range (with date label per row, internal scroll at `max-h-[640px]`). Week strip, rejected banner, and submit-week row are hidden in Custom view since they're week-anchored. Dropdown tints `primary-soft` when not on default `Day` to flag a non-default selection.
+
 ### ✅ Epic 3 — Projects (done)
 
 All UI + CRUD live. Budget bars and Hours columns read real `TimeEntry` aggregates.
@@ -143,10 +145,10 @@ Per-route role guards: in place across Team, Manage, Settings (owner/admin), Rep
 ### ✅ Epic 5 — Reports (done, 1 pending)
 
 Live at `/reports/*` (visible to all roles — Member sees own data, Manager sees managed projects, Admin/Owner sees everything):
-- **Time report** — hours grouped by client/project/task, billable %, charts
+- **Time report** — hours grouped by client/project/task, billable %, charts. Amount columns + KPI use `formatCurrency()` and respect workspace currency (₹, $, €, …) reactively. **Billable amount column + KPI are hidden for Member role** (Rate column in the project-task drilldown too — rate alone is meaningless without amount).
 - **Profitability** — admin-only, costs/billable amounts (data hidden in UI per V2 but available)
 - **Detailed Time** — drill-down by user/project/date with CSV export
-- **Activity Log** — edit/delete timeline (gated by `activity_log` module flag)
+- **Activity Log** — edit/delete timeline (gated by `activity_log` module flag). Member sees own activity + project-created events only for projects they're a member of.
 - **Saved Reports** — name + share filter combinations across users
 
 | Story | Status |
@@ -208,7 +210,7 @@ Stories US-40 to US-43 — partial.
 - **Sign-in security** — 2FA requirement, allow Google/Microsoft SSO, session timeout, login alerts
 - **Import/Export** — sample data add/remove, CSV imports for clients/projects/people, ownership transfer
 
-**Caveat:** Timer mode, Currency, and Number format settings save to DB but **don't yet affect UI display** — wiring deferred. UX consideration: either drop them from Preferences or wire them up.
+**Caveat:** Timer mode setting still saves to DB without affecting UI. **Currency + Number format are now wired** — Time report, Profitability, Project Detail all use `formatCurrency()` / `formatMoney()` which read from `useAccountSettingsStore` reactively. Setting INR in Preferences flips `$` → `₹` immediately across these pages.
 
 ### ✅ Profile module (done)
 
@@ -251,12 +253,13 @@ When you need these patterns, **grab the existing primitive** — don't reinvent
 - ~~Multi-tenancy~~: ✅ `Account` model + `account_id` FK on users/clients/projects/tasks. JWT carries `account_id`. `TenantScopedMixin` auto-filters by `request.user.account_id`.
 - ~~Production email~~: ✅ Real Gmail SMTP via `backend/.env`. Password-reset, invite, approval emails deliver to real inboxes.
 - ~~Manager role~~: ✅ DB enum + invite + edit-role + per-route guards all wired. Manager works end-to-end across Team / Projects / Approvals / Profile.
+- ~~Member-role visibility scoping~~: ✅ Tenant scoping alone (`account_id`) wasn't enough — list endpoints were leaking workspace-wide data to Member role. Now scoped: `ProjectViewSet`, `ClientViewSet`, `ClientContactViewSet`, `TaskViewSet` filter to projects/clients/tasks where `memberships__user=request.user` for non-admin/owner roles. `UserListView` returns only teammates sharing a project (plus self). `ActivityLogReportView` project-created events also scoped. Manager + Member both fall under this filter; admin/owner unaffected.
 
 **Open — high priority** (user-visible gaps shipped this session):
 - **Notification prefs not respected by `send_mail`**: 🟡 partial. `User.notification_prefs` saves correctly from `/profile/notifications`, but the actual email-sending code in `apps/timesheets/views.py` (timesheet submitted / approved emails) and the project-deleted path don't read those prefs yet. Users can uncheck a box but still get the email. ~2-3 hours to wire — close before next feature work.
 - **Backend brand still says "TrackFlow"**: ⬜ pending. UI was renamed to KlokView, but `backend/apps/accounts/views.py` invite + reset email subject/body, `backend/apps/timesheets/views.py` approval email content, `apps/integrations/*.py` log lines, and `backend/.env.example` all still say "TrackFlow". User-visible in delivered emails — should match the UI rename.
 - **Photo upload**: ⬜ pending. Profile › Display shows a disabled "Upload photo · coming soon" chip. Needs `MEDIA_ROOT` config + `User.avatar_image` field + multipart endpoint + Pillow resize + file picker UI. ~2-3 hours for local MVP, +half day for S3.
-- **Preferences settings save but no visible effect**: 🟡 partial. `Account.timer_mode` / `currency` / `number_format` save to DB but aren't read anywhere in UI display code. Either drop them from the form or wire them up.
+- **Preferences settings save but no visible effect**: 🟡 narrowed. `currency` + `number_format` now wired via `formatCurrency()` / `formatMoney()` across Time report, Profitability, Project Detail. `Account.timer_mode` still saves but isn't read anywhere — drop from the form or wire it up. **Indian lakh-style grouping (1,23,456) is not supported yet** — `number_format` only maps to en-US / de-DE / fr-FR locales. With INR currency the amount renders as `₹1,234.56` (US grouping). Add an `en-IN` mapping if Indian grouping is needed.
 
 **Open — lower priority:**
 - **Seed-data migration**: ⬜ pending. `[SAMPLE]` data exists in current DB but isn't codified as a Django data migration — fresh `migrate` won't reproduce it. Add when onboarding a new dev/customer.

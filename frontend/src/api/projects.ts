@@ -17,6 +17,10 @@ export interface ProjectFilters {
   manager_id?: number;
   project_type?: ProjectType;
   search?: string;
+  // When set, spent_amount is computed only from time entries in this window.
+  // Omit (or pass empty) for lifetime totals.
+  start_date?: string;
+  end_date?: string;
 }
 
 export async function listProjects(filters?: ProjectFilters): Promise<Paginated<ProjectListItem>> {

@@ -4,6 +4,7 @@ from .jira_views import (
     JiraClaimView,
     JiraDisconnectView,
     JiraEntriesView,
+    JiraProjectsView,
     JiraStartView,
     JiraStatusView,
     JiraStopView,
@@ -33,8 +34,9 @@ urlpatterns = [
     # Atlassian install lifecycle (unauthenticated — secret arrives in payload)
     path('jira/installed/', jira_installed, name='jira-installed'),
     path('jira/uninstalled/', jira_uninstalled, name='jira-uninstalled'),
-    # Forge panel → Django (Jira-signed JWT auth)
+    # Forge panel → Django (Jira-signed JWT auth in prod, cloud_id in dev)
     path('jira/entries/', JiraEntriesView.as_view(), name='jira-entries'),
+    path('jira/projects/', JiraProjectsView.as_view(), name='jira-projects'),
     path('jira/start/', JiraStartView.as_view(), name='jira-start'),
     path('jira/stop/', JiraStopView.as_view(), name='jira-stop'),
     # Forge auto-bootstrap — replicates Marketplace install lifecycle

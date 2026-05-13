@@ -45,99 +45,16 @@ import { useAccountSettingsStore } from '@/store/accountSettingsStore';
 import { useAuthStore } from '@/store/authStore';
 import { extractApiError } from '@/utils/errors';
 import { formatBudget, formatCurrency, useCurrencySymbol } from '@/utils/format';
+import {
+  RANGE_LABEL,
+  type RangeKey,
+  computeRangeDates,
+  formatRangeHeader,
+} from '@/utils/dateRanges';
 import type { BudgetType, ProjectDetail, ProjectVisibility, Task, User } from '@/types';
 
 type TabKey = 'tasks' | 'team';
 type ChartKey = 'progress' | 'hours';
-type RangeKey =
-  | 'this_week'
-  | 'this_semimonth'
-  | 'this_month'
-  | 'this_quarter'
-  | 'this_year'
-  | 'all_time'
-  | 'custom';
-
-const RANGE_LABEL: Record<RangeKey, string> = {
-  this_week: 'Week',
-  this_semimonth: 'Semimonth',
-  this_month: 'Month',
-  this_quarter: 'Quarter',
-  this_year: 'Year',
-  all_time: 'All time',
-  custom: 'Custom',
-};
-
-function computeRangeDates(
-  range: RangeKey,
-  customStart?: string,
-  customEnd?: string,
-): { start?: string; end?: string } {
-  const today = new Date();
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  if (range === 'custom') {
-    return {
-      start: customStart || iso(today),
-      end: customEnd || iso(today),
-    };
-  }
-  if (range === 'all_time') {
-    return { start: '2000-01-01', end: iso(today) };
-  }
-  if (range === 'this_week') {
-    const dow = (today.getDay() + 6) % 7;
-    const start = new Date(today);
-    start.setDate(today.getDate() - dow);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
-    return { start: iso(start), end: iso(end) };
-  }
-  if (range === 'this_semimonth') {
-    const y = today.getFullYear();
-    const m = today.getMonth();
-    const firstHalf = today.getDate() <= 15;
-    const start = new Date(y, m, firstHalf ? 1 : 16);
-    const end = firstHalf ? new Date(y, m, 15) : new Date(y, m + 1, 0);
-    return { start: iso(start), end: iso(end) };
-  }
-  if (range === 'this_month') {
-    const start = new Date(today.getFullYear(), today.getMonth(), 1);
-    const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    return { start: iso(start), end: iso(end) };
-  }
-  if (range === 'this_quarter') {
-    const q = Math.floor(today.getMonth() / 3);
-    const start = new Date(today.getFullYear(), q * 3, 1);
-    const end = new Date(today.getFullYear(), q * 3 + 3, 0);
-    return { start: iso(start), end: iso(end) };
-  }
-  // this_year
-  const start = new Date(today.getFullYear(), 0, 1);
-  const end = new Date(today.getFullYear(), 11, 31);
-  return { start: iso(start), end: iso(end) };
-}
-
-function formatDateRangeLabel(start?: string, end?: string): string {
-  if (!start || !end) return '';
-  const s = new Date(`${start}T00:00:00`);
-  const e = new Date(`${end}T00:00:00`);
-  const sameMonth = s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear();
-  const sameYear = s.getFullYear() === e.getFullYear();
-  const monthFmt: Intl.DateTimeFormatOptions = { month: 'short' };
-  const fullFmt: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
-  if (sameMonth) {
-    return `${s.getDate()} – ${e.getDate()} ${s.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`;
-  }
-  if (sameYear) {
-    return `${s.getDate()} ${s.toLocaleDateString('en-US', monthFmt)} – ${e.getDate()} ${e.toLocaleDateString('en-US', monthFmt)} ${s.getFullYear()}`;
-  }
-  return `${s.toLocaleDateString('en-US', fullFmt)} – ${e.toLocaleDateString('en-US', fullFmt)}`;
-}
-
-function formatRangeHeader(range: Exclude<RangeKey, 'all_time' | 'custom'>): string {
-  const { start, end } = computeRangeDates(range);
-  return formatDateRangeLabel(start, end);
-}
 
 export default function ProjectDetailPage() {
   // Re-render when the workspace currency / number_format changes in Settings.
@@ -149,6 +66,10 @@ export default function ProjectDetailPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const canEdit = user?.role === 'owner' || user?.role === 'admin';
+  const role = user?.role;
+  const showBillable = role !== 'member';
+  const showCosts = role === 'owner' || role === 'admin';
+  const showManages = role !== 'member';
   const { confirmDialog, ask } = useConfirm();
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
@@ -156,18 +77,15 @@ export default function ProjectDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>('tasks');
   const [chartView, setChartView] = useState<ChartKey>('progress');
-  const [range, setRange] = useState<RangeKey>('all_time');
+  // Single period selector drives the chart, the table, and Team Utilization.
+  // Default 'this_week' so the page lands on a focused snapshot rather than
+  // an all-time blob.
   const [chartRange, setChartRange] = useState<RangeKey>('this_week');
   const [chartWindowHours, setChartWindowHours] = useState<number>(0);
   const [chartWindowBillable, setChartWindowBillable] = useState<number>(0);
-  const [chartLoading, setChartLoading] = useState(false);
-  // Custom date pickers — default both pickers to current week so 'Custom'
-  // starts with a sensible range rather than empty inputs.
   const initialCustom = useMemo(() => computeRangeDates('this_week'), []);
   const [chartCustomStart, setChartCustomStart] = useState<string>(initialCustom.start ?? '');
   const [chartCustomEnd, setChartCustomEnd] = useState<string>(initialCustom.end ?? '');
-  const [tableCustomStart, setTableCustomStart] = useState<string>(initialCustom.start ?? '');
-  const [tableCustomEnd, setTableCustomEnd] = useState<string>(initialCustom.end ?? '');
   const [showFullNotes, setShowFullNotes] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -207,7 +125,6 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     if (Number.isNaN(projectId)) return;
     let cancelled = false;
-    setChartLoading(true);
     const { start, end } = computeRangeDates(chartRange, chartCustomStart, chartCustomEnd);
     getTimeReport({ project_id: projectId, start, end })
       .then((data) => {
@@ -219,9 +136,6 @@ export default function ProjectDetailPage() {
         if (cancelled) return;
         setChartWindowHours(0);
         setChartWindowBillable(0);
-      })
-      .finally(() => {
-        if (!cancelled) setChartLoading(false);
       });
     return () => {
       cancelled = true;
@@ -351,9 +265,10 @@ export default function ProjectDetailPage() {
   }
 
   const budgetAmount = Number.parseFloat(project.budget_amount ?? '0');
+  // Lifetime totals used by the budget-remaining card (which intentionally
+  // stays lifetime). The period-scoped Total Hours card reads chartWindowHours
+  // + chartWindowBillable instead.
   const totalLogged = Number.parseFloat(project.total_hours_logged ?? '0');
-  const billableLogged = Number.parseFloat(project.billable_hours_logged ?? '0');
-  const nonBillableLogged = Number.parseFloat(project.non_billable_hours_logged ?? '0');
   const spent = totalLogged;
   const remaining = budgetAmount - spent;
   const pct = budgetAmount > 0 ? Math.min((spent / budgetAmount) * 100, 100) : 0;
@@ -423,26 +338,72 @@ export default function ProjectDetailPage() {
               </div>
             ) : null}
           </div>
-          {canEdit ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {!project.is_active ? (
+          {/* Period selector — page-level filter, drives top cards + graph +
+              tables. Visible to all roles (members included) since it doesn't
+              modify any data; it's a read-only filter over their own scope. */}
+          <div className="flex flex-wrap items-start gap-2">
+            {/* Dropdown stacks with its resolved date range directly below —
+                tight visual coupling, no need for a heavy pill background. */}
+            <div className="flex flex-col items-start gap-1">
+              <select
+                value={chartRange}
+                onChange={(e) => setChartRange(e.target.value as RangeKey)}
+                className="input w-full py-2 text-sm sm:w-auto"
+                aria-label="Period filter"
+              >
+                {(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => (
+                  <option key={k} value={k}>
+                    {RANGE_LABEL[k]}
+                  </option>
+                ))}
+              </select>
+              {chartRange !== 'all_time' && chartRange !== 'custom' ? (
+                <span className="px-0.5 text-sm font-semibold text-text/75">
+                  {formatRangeHeader(chartRange)}
+                </span>
+              ) : null}
+            </div>
+            {chartRange === 'custom' ? (
+              <>
+                <input
+                  type="date"
+                  value={chartCustomStart}
+                  max={chartCustomEnd || undefined}
+                  onChange={(e) => setChartCustomStart(e.target.value)}
+                  className="input w-auto py-2 text-sm"
+                  aria-label="Custom start date"
+                />
+                <span className="text-sm font-medium text-muted">to</span>
+                <input
+                  type="date"
+                  value={chartCustomEnd}
+                  min={chartCustomStart || undefined}
+                  onChange={(e) => setChartCustomEnd(e.target.value)}
+                  className="input w-auto py-2 text-sm"
+                  aria-label="Custom end date"
+                />
+              </>
+            ) : null}
+            {canEdit ? (
+              <>
+                {!project.is_active ? (
+                  <button
+                    type="button"
+                    onClick={handleRestore}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-accent-dark/30 bg-accent-soft px-3.5 py-2 text-sm font-semibold text-accent-dark shadow-sm transition hover:bg-accent-soft/70"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Restore project
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={handleRestore}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-accent-dark/30 bg-accent-soft px-3.5 py-2 text-sm font-semibold text-accent-dark shadow-sm transition hover:bg-accent-soft/70"
+                  onClick={() => setEditOpen(true)}
+                  className="btn-outline"
                 >
-                  <RotateCcw className="h-4 w-4" />
-                  Restore project
+                  <Pencil className="h-4 w-4" />
+                  Edit project
                 </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setEditOpen(true)}
-                className="btn-outline"
-              >
-                <Pencil className="h-4 w-4" />
-                Edit project
-              </button>
               <div className="relative">
                 <button
                   type="button"
@@ -484,8 +445,9 @@ export default function ProjectDetailPage() {
                   </>
                 ) : null}
               </div>
-            </div>
-          ) : null}
+              </>
+            ) : null}
+          </div>
         </div>
 
         {/* KPI metrics row above, full-width chart below. Stacked layout gives the
@@ -518,19 +480,10 @@ export default function ProjectDetailPage() {
               </div>
             </div>
 
+            {/* Period selector moved to the page header (next to "Edit project")
+                since it now drives top KPI cards + table too — not just this
+                chart. The toggle below is chart-specific and stays here. */}
             <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
-              <select
-                value={chartRange}
-                onChange={(e) => setChartRange(e.target.value as RangeKey)}
-                className="input w-full py-1.5 text-sm sm:w-auto"
-                aria-label="Chart time range"
-              >
-                {(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => (
-                  <option key={k} value={k}>
-                    {RANGE_LABEL[k]}
-                  </option>
-                ))}
-              </select>
               <div
                 role="tablist"
                 aria-label="Chart view"
@@ -568,66 +521,8 @@ export default function ProjectDetailPage() {
             </div>
           </div>
 
-          {/* Period summary chips — reflect the selected chart range. */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-slate-100 px-5 py-3 text-xs">
-            <span className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
-              <span className="font-semibold uppercase tracking-wider text-muted">
-                {RANGE_LABEL[chartRange]} total
-              </span>
-              <span className="font-bold tabular-nums text-text">
-                {chartLoading ? '…' : `${chartWindowHours.toFixed(2)} hr`}
-              </span>
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
-              <span className="font-semibold uppercase tracking-wider text-muted">Billable</span>
-              <span className="font-bold tabular-nums text-text">
-                {chartLoading ? '…' : `${chartWindowBillable.toFixed(2)} hr`}
-              </span>
-            </span>
-          </div>
-
-          {/* Range header — mirrors the table's "Week: 11 – 17 May 2026" pattern.
-              For 'custom' shows two date pickers. */}
-          {chartRange === 'custom' ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-100 px-5 py-3">
-              <h3 className="font-heading text-base font-bold text-text sm:text-lg">
-                {RANGE_LABEL[chartRange]}:
-              </h3>
-              <input
-                type="date"
-                value={chartCustomStart}
-                max={chartCustomEnd || undefined}
-                onChange={(e) => setChartCustomStart(e.target.value)}
-                className="input w-auto py-1.5 text-sm"
-                aria-label="Custom start date"
-              />
-              <span className="text-sm font-medium text-muted">to</span>
-              <input
-                type="date"
-                value={chartCustomEnd}
-                min={chartCustomStart || undefined}
-                onChange={(e) => setChartCustomEnd(e.target.value)}
-                className="input w-auto py-1.5 text-sm"
-                aria-label="Custom end date"
-              />
-              {chartCustomStart && chartCustomEnd ? (
-                <span className="text-sm font-medium text-muted">
-                  ({formatDateRangeLabel(chartCustomStart, chartCustomEnd)})
-                </span>
-              ) : null}
-            </div>
-          ) : chartRange !== 'all_time' ? (
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-slate-100 px-5 py-3">
-              <h3 className="font-heading text-base font-bold text-text sm:text-lg">
-                {RANGE_LABEL[chartRange]}:
-              </h3>
-              <span className="text-sm font-medium text-muted">
-                {formatRangeHeader(chartRange)}
-              </span>
-            </div>
-          ) : null}
+          {/* Period summary strip removed — the top "Team spent hours" KPI
+              card already shows the same period total + billable split. */}
 
           <div className="px-4 pb-4 pt-4 sm:px-5">
             <ProjectChart
@@ -644,17 +539,23 @@ export default function ProjectDetailPage() {
             `auto-rows-fr` keeps the three cards equal-height. */}
         <div className="order-1 grid grid-cols-1 gap-4 sm:auto-rows-fr sm:grid-cols-3">
           {(() => {
-            const billablePct = totalLogged > 0 ? (billableLogged / totalLogged) * 100 : 0;
+            // Total Hours card is period-scoped — follows the dropdown so the
+            // value matches the chart + tasks table for the same window.
+            // chartWindowHours equals totalLogged when range='all_time'.
+            const periodTotal = chartWindowHours;
+            const periodBillable = chartWindowBillable;
+            const periodNonBillable = Math.max(periodTotal - periodBillable, 0);
+            const billablePct = periodTotal > 0 ? (periodBillable / periodTotal) * 100 : 0;
             return (
               <div className="card relative flex h-full flex-col overflow-hidden p-5 transition hover:shadow-lg">
                 <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary to-primary/40" />
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
-                      Total hours
+                      Team spent hours · {RANGE_LABEL[chartRange]}
                     </p>
                     <p className="mt-2 font-heading text-3xl font-bold tabular-nums text-text">
-                      {totalLogged.toFixed(2)}
+                      {periodTotal.toFixed(2)}
                       <span className="ml-1 text-base font-medium text-muted">hr</span>
                     </p>
                   </div>
@@ -662,7 +563,7 @@ export default function ProjectDetailPage() {
                     <Clock className="h-5 w-5" />
                   </div>
                 </div>
-                {totalLogged > 0 ? (
+                {periodTotal > 0 ? (
                   <div className="mt-auto pt-4">
                     <div className="flex h-2 overflow-hidden rounded-full bg-slate-100">
                       <div
@@ -679,20 +580,20 @@ export default function ProjectDetailPage() {
                         <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
                         <span className="text-muted">Billable</span>
                         <span className="font-semibold tabular-nums text-text">
-                          {billableLogged.toFixed(2)}
+                          {periodBillable.toFixed(2)}
                         </span>
                       </span>
                       <span className="flex items-center gap-1.5">
                         <span className="h-2 w-2 rounded-full bg-slate-300" aria-hidden="true" />
                         <span className="text-muted">Non-billable</span>
                         <span className="font-semibold tabular-nums text-text">
-                          {nonBillableLogged.toFixed(2)}
+                          {periodNonBillable.toFixed(2)}
                         </span>
                       </span>
                     </div>
                   </div>
                 ) : (
-                  <p className="mt-auto pt-3 text-xs text-muted">No hours logged yet.</p>
+                  <p className="mt-auto pt-3 text-xs text-muted">No hours logged in this range.</p>
                 )}
               </div>
             );
@@ -729,7 +630,11 @@ export default function ProjectDetailPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
-                      Remaining hours {hasBudget ? `(${Math.max(0, Math.round(100 - pct))}%)` : ''}
+                      {/* Budget remaining is lifetime — period-scoped value
+                          wouldn't match budget semantics (budgets aren't
+                          weekly). Label hint distinguishes from Total Hours
+                          which IS period-scoped. */}
+                      Budget remaining {hasBudget ? `(${Math.max(0, Math.round(100 - pct))}%)` : ''}
                     </p>
                     <p
                       className={`mt-2 font-heading text-3xl font-bold tabular-nums ${valueTone}`}
@@ -870,17 +775,8 @@ export default function ProjectDetailPage() {
             })}
           </div>
           <div className="flex items-center gap-2 pb-2">
-            <select
-              value={range}
-              onChange={(e) => setRange(e.target.value as RangeKey)}
-              className="input w-auto py-1.5 text-sm"
-            >
-              {(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => (
-                <option key={k} value={k}>
-                  {RANGE_LABEL[k]}
-                </option>
-              ))}
-            </select>
+            {/* Period dropdown lives in the graph header above; table inherits
+                the same range so users have one control point per page. */}
             <button
               type="button"
               onClick={handleExport}
@@ -894,63 +790,31 @@ export default function ProjectDetailPage() {
           </div>
         </div>
 
-        {/* Period range header — shows date range for fixed periods, date pickers for 'custom'. */}
-        {range === 'custom' ? (
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h3 className="font-heading text-base font-bold text-text sm:text-lg">
-              {RANGE_LABEL[range]}:
-            </h3>
-            <input
-              type="date"
-              value={tableCustomStart}
-              max={tableCustomEnd || undefined}
-              onChange={(e) => setTableCustomStart(e.target.value)}
-              className="input w-auto py-1.5 text-sm"
-              aria-label="Custom start date"
-            />
-            <span className="text-sm font-medium text-muted">to</span>
-            <input
-              type="date"
-              value={tableCustomEnd}
-              min={tableCustomStart || undefined}
-              onChange={(e) => setTableCustomEnd(e.target.value)}
-              className="input w-auto py-1.5 text-sm"
-              aria-label="Custom end date"
-            />
-            {tableCustomStart && tableCustomEnd ? (
-              <span className="text-sm font-medium text-muted">
-                ({formatDateRangeLabel(tableCustomStart, tableCustomEnd)})
-              </span>
-            ) : null}
-          </div>
-        ) : range !== 'all_time' ? (
-          <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h3 className="font-heading text-base font-bold text-text sm:text-lg">
-              {RANGE_LABEL[range]}:
-            </h3>
-            <span className="text-sm font-medium text-muted">
-              {formatRangeHeader(range)}
-            </span>
-          </div>
-        ) : null}
+        {/* Period header removed — page header above already shows the
+            active range. Tables read the same chartRange. */}
 
         <div className="py-6">
           {tab === 'tasks' ? (
             <TasksPanel
               project={project}
               canEdit={canEdit}
-              range={range}
-              customStart={tableCustomStart}
-              customEnd={tableCustomEnd}
+              showBillable={showBillable}
+              showCosts={showCosts}
+              range={chartRange}
+              customStart={chartCustomStart}
+              customEnd={chartCustomEnd}
               onChange={refreshProject}
             />
           ) : (
             <TeamPanel
               project={project}
               canEdit={canEdit}
-              range={range}
-              customStart={tableCustomStart}
-              customEnd={tableCustomEnd}
+              showBillable={showBillable}
+              showCosts={showCosts}
+              showManages={showManages}
+              range={chartRange}
+              customStart={chartCustomStart}
+              customEnd={chartCustomEnd}
               onChange={refreshProject}
             />
           )}
@@ -1177,12 +1041,14 @@ function ProjectChart({
 }) {
   // Width/height in viewBox units — wider aspect to match the full-width container
   // (chart now sits in a stacked layout, not 2/3 column).
-  // padL is sized to fit the widest y-label without clipping.
+  // padL is sized to fit the widest y-label without clipping. padT is tight so
+  // the chart doesn't float in dead space above the top gridline; the SVG is
+  // top-aligned (preserveAspectRatio="xMidYMin meet") for the same reason.
   const W = 1200;
   const H = 280;
   const padL = 80;
   const padR = 48;
-  const padT = 36;
+  const padT = 24;
   const padB = 32;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -1245,7 +1111,8 @@ function ProjectChart({
     <div className="w-full overflow-x-auto sm:overflow-x-visible">
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="block h-80 w-[680px] sm:w-full"
+        preserveAspectRatio="xMidYMin meet"
+        className="block h-72 w-[680px] sm:w-full"
       >
         {/* gridlines + y labels */}
         {tickValues.map((v, i) => {
@@ -1427,6 +1294,8 @@ function ProjectChart({
 function TasksPanel({
   project,
   canEdit,
+  showBillable,
+  showCosts,
   range,
   customStart,
   customEnd,
@@ -1434,11 +1303,14 @@ function TasksPanel({
 }: {
   project: ProjectDetail;
   canEdit: boolean;
+  showBillable: boolean;
+  showCosts: boolean;
   range: RangeKey;
   customStart?: string;
   customEnd?: string;
   onChange: () => void;
 }) {
+  const cols = 4 + (showBillable ? 1 : 0) + (showCosts ? 1 : 0);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [adding, setAdding] = useState<number | ''>('');
   const [breakdown, setBreakdown] = useState<TaskBreakdownRow[]>([]);
@@ -1604,12 +1476,16 @@ function TasksPanel({
               {row.hours.toFixed(2)}
             </Link>
           </td>
-          <td className="px-4 py-3 text-right font-semibold tabular-nums text-text">
-            {row.isBillable ? formatCurrency(row.billableAmount) : <span className="text-muted">—</span>}
-          </td>
-          <td className="px-4 py-3 text-right tabular-nums text-text">
-            {formatCurrency(row.cost)}
-          </td>
+          {showBillable ? (
+            <td className="px-4 py-3 text-right font-semibold tabular-nums text-text">
+              {row.isBillable ? formatCurrency(row.billableAmount) : <span className="text-muted">—</span>}
+            </td>
+          ) : null}
+          {showCosts ? (
+            <td className="px-4 py-3 text-right tabular-nums text-text">
+              {formatCurrency(row.cost)}
+            </td>
+          ) : null}
           <td className="px-4 py-3 text-right">
             {canEdit && row.taskId ? (
               <button
@@ -1626,7 +1502,7 @@ function TasksPanel({
         {isOpen && row.members.length === 0 ? (
           <tr className="border-b border-slate-100 bg-slate-50/40">
             <td className="px-3 py-2.5" />
-            <td colSpan={5} className="px-4 py-2.5 pl-10 text-xs italic text-muted">
+            <td colSpan={cols - 1} className="px-4 py-2.5 pl-10 text-xs italic text-muted">
               {breakdownLoading
                 ? 'Loading team breakdown…'
                 : 'No team breakdown available for this task yet.'}
@@ -1665,16 +1541,20 @@ function TasksPanel({
                     {Number.parseFloat(m.hours).toFixed(2)}
                   </Link>
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-text">
-                  {row.isBillable ? (
-                    formatCurrency(m.billable_amount || '0')
-                  ) : (
-                    <span className="text-muted">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-text">
-                  {formatCurrency(m.cost || '0')}
-                </td>
+                {showBillable ? (
+                  <td className="px-4 py-2.5 text-right tabular-nums text-text">
+                    {row.isBillable ? (
+                      formatCurrency(m.billable_amount || '0')
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+                ) : null}
+                {showCosts ? (
+                  <td className="px-4 py-2.5 text-right tabular-nums text-text">
+                    {formatCurrency(m.cost || '0')}
+                  </td>
+                ) : null}
                 <td className="px-4 py-2.5" />
               </tr>
             ))
@@ -1688,7 +1568,7 @@ function TasksPanel({
     const text = tone === 'billable' ? 'text-accent-dark' : 'text-slate-500';
     return (
       <tr className="border-b border-slate-100">
-        <td colSpan={6} className="px-4 pb-2 pt-4">
+        <td colSpan={cols} className="px-4 pb-2 pt-4">
           <span className="flex items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${dot}`} aria-hidden="true" />
             <span className={`text-xs font-bold uppercase tracking-[0.1em] ${text}`}>
@@ -1709,21 +1589,21 @@ function TasksPanel({
               <th className="w-10 px-3 py-3" />
               <th className="px-4 py-3">Task</th>
               <th className="px-4 py-3 text-right">Hours</th>
-              <th className="px-4 py-3 text-right">Billable amount</th>
-              <th className="px-4 py-3 text-right">Costs</th>
+              {showBillable ? <th className="px-4 py-3 text-right">Billable amount</th> : null}
+              {showCosts ? <th className="px-4 py-3 text-right">Costs</th> : null}
               <th className="w-12 px-4 py-3" />
             </tr>
           </thead>
           <tbody>
             {breakdownLoading && rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-6 py-10 text-center text-sm text-muted">
+                <td colSpan={cols} className="px-6 py-10 text-center text-sm text-muted">
                   Loading…
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-6 py-10 text-center text-sm text-muted">
+                <td colSpan={cols} className="px-6 py-10 text-center text-sm text-muted">
                   No tasks assigned yet.
                 </td>
               </tr>
@@ -1750,12 +1630,16 @@ function TasksPanel({
                 <td className="px-4 py-3 text-right tabular-nums text-text">
                   {totals.hours.toFixed(2)}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums text-text">
-                  {formatCurrency(totals.billableAmount)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-text">
-                  {formatCurrency(totals.cost)}
-                </td>
+                {showBillable ? (
+                  <td className="px-4 py-3 text-right tabular-nums text-text">
+                    {formatCurrency(totals.billableAmount)}
+                  </td>
+                ) : null}
+                {showCosts ? (
+                  <td className="px-4 py-3 text-right tabular-nums text-text">
+                    {formatCurrency(totals.cost)}
+                  </td>
+                ) : null}
                 <td className="px-4 py-3" />
               </tr>
             ) : null}
@@ -1789,6 +1673,9 @@ function TasksPanel({
 function TeamPanel({
   project,
   canEdit,
+  showBillable,
+  showCosts,
+  showManages,
   range,
   customStart,
   customEnd,
@@ -1796,6 +1683,9 @@ function TeamPanel({
 }: {
   project: ProjectDetail;
   canEdit: boolean;
+  showBillable: boolean;
+  showCosts: boolean;
+  showManages: boolean;
   range: RangeKey;
   customStart?: string;
   customEnd?: string;
@@ -1807,6 +1697,9 @@ function TeamPanel({
   const [breakdownLoading, setBreakdownLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const currencySymbol = useCurrencySymbol();
+  const showRate = showBillable && project.billable_rate_strategy === 'person';
+  const cols =
+    4 + (showRate ? 1 : 0) + (showBillable ? 1 : 0) + (showCosts ? 1 : 0) + (showManages ? 1 : 0);
 
   useEffect(() => {
     listUsers().then(setUsers);
@@ -1939,12 +1832,14 @@ function TeamPanel({
               <th className="w-10 px-3 py-3" />
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3 text-right">Hours</th>
-              {project.billable_rate_strategy === 'person' ? (
+              {showRate ? (
                 <th className="px-4 py-3 text-right">Rate (per hr)</th>
               ) : null}
-              <th className="px-4 py-3 text-right">Billable amount</th>
-              <th className="px-4 py-3 text-right">Costs</th>
-              <th className="px-4 py-3 text-center">Manages</th>
+              {showBillable ? (
+                <th className="px-4 py-3 text-right">Billable amount</th>
+              ) : null}
+              {showCosts ? <th className="px-4 py-3 text-right">Costs</th> : null}
+              {showManages ? <th className="px-4 py-3 text-center">Manages</th> : null}
               <th className="w-12 px-4 py-3" />
             </tr>
           </thead>
@@ -1952,7 +1847,7 @@ function TeamPanel({
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={project.billable_rate_strategy === 'person' ? 8 : 7}
+                  colSpan={cols}
                   className="px-6 py-10 text-center text-sm text-muted"
                 >
                   No team members yet.
@@ -2000,7 +1895,7 @@ function TeamPanel({
                           {row.hours.toFixed(2)}
                         </Link>
                       </td>
-                      {project.billable_rate_strategy === 'person' ? (
+                      {showRate ? (
                         <td className="px-4 py-3 text-right">
                           <div className="relative ml-auto w-24">
                             <span
@@ -2029,21 +1924,27 @@ function TeamPanel({
                           </div>
                         </td>
                       ) : null}
-                      <td className="px-4 py-3 text-right font-semibold tabular-nums text-text">
-                        {formatCurrency(row.billableAmount)}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-text">
-                        {formatCurrency(row.cost)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={row.isProjectManager}
-                          disabled={!canEdit}
-                          onChange={(e) => handleToggleManager(row.userId, e.target.checked)}
-                          className="h-4 w-4 accent-primary"
-                        />
-                      </td>
+                      {showBillable ? (
+                        <td className="px-4 py-3 text-right font-semibold tabular-nums text-text">
+                          {formatCurrency(row.billableAmount)}
+                        </td>
+                      ) : null}
+                      {showCosts ? (
+                        <td className="px-4 py-3 text-right tabular-nums text-text">
+                          {formatCurrency(row.cost)}
+                        </td>
+                      ) : null}
+                      {showManages ? (
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={row.isProjectManager}
+                            disabled={!canEdit}
+                            onChange={(e) => handleToggleManager(row.userId, e.target.checked)}
+                            className="h-4 w-4 accent-primary"
+                          />
+                        </td>
+                      ) : null}
                       <td className="px-4 py-3 text-right">
                         {canEdit ? (
                           <button
@@ -2061,7 +1962,7 @@ function TeamPanel({
                       <tr className="border-b border-slate-100 bg-slate-50/40">
                         <td className="px-3 py-2.5" />
                         <td
-                          colSpan={project.billable_rate_strategy === 'person' ? 7 : 6}
+                          colSpan={cols - 1}
                           className="px-4 py-2.5 pl-10 text-xs italic text-muted"
                         >
                           {breakdownLoading
@@ -2091,16 +1992,18 @@ function TeamPanel({
                                 {Number.parseFloat(t.hours).toFixed(2)}
                               </Link>
                             </td>
-                            {project.billable_rate_strategy === 'person' ? (
-                              <td className="px-4 py-2.5" />
+                            {showRate ? <td className="px-4 py-2.5" /> : null}
+                            {showBillable ? (
+                              <td className="px-4 py-2.5 text-right tabular-nums text-text">
+                                {formatCurrency(t.billable_amount || '0')}
+                              </td>
                             ) : null}
-                            <td className="px-4 py-2.5 text-right tabular-nums text-text">
-                              {formatCurrency(t.billable_amount || '0')}
-                            </td>
-                            <td className="px-4 py-2.5 text-right tabular-nums text-text">
-                              {formatCurrency(t.cost || '0')}
-                            </td>
-                            <td className="px-4 py-2.5" />
+                            {showCosts ? (
+                              <td className="px-4 py-2.5 text-right tabular-nums text-text">
+                                {formatCurrency(t.cost || '0')}
+                              </td>
+                            ) : null}
+                            {showManages ? <td className="px-4 py-2.5" /> : null}
                             <td className="px-4 py-2.5" />
                           </tr>
                         ))
@@ -2116,16 +2019,18 @@ function TeamPanel({
                 <td className="px-4 py-3 text-right tabular-nums text-text">
                   {totals.hours.toFixed(2)}
                 </td>
-                {project.billable_rate_strategy === 'person' ? (
-                  <td className="px-4 py-3" />
+                {showRate ? <td className="px-4 py-3" /> : null}
+                {showBillable ? (
+                  <td className="px-4 py-3 text-right tabular-nums text-text">
+                    {formatCurrency(totals.billableAmount)}
+                  </td>
                 ) : null}
-                <td className="px-4 py-3 text-right tabular-nums text-text">
-                  {formatCurrency(totals.billableAmount)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-text">
-                  {formatCurrency(totals.cost)}
-                </td>
-                <td className="px-4 py-3" />
+                {showCosts ? (
+                  <td className="px-4 py-3 text-right tabular-nums text-text">
+                    {formatCurrency(totals.cost)}
+                  </td>
+                ) : null}
+                {showManages ? <td className="px-4 py-3" /> : null}
                 <td className="px-4 py-3" />
               </tr>
             ) : null}

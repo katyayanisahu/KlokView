@@ -295,10 +295,34 @@ class TimeReportView(APIView):
         start = _parse_date(request.query_params.get('start'), default_start)
         end = _parse_date(request.query_params.get('end'), default_end)
 
-        qs = (
-            _scope_qs_for_user(request.user)
-            .filter(date__gte=start, date__lte=end)
-            .select_related('user', 'project__client', 'project_task__task')
+        # When the caller drills into a single project they're a member of,
+        # surface the FULL project team's hours — not just their own. Matches
+        # Projects List's "Spent" + Budget Remaining card on Project Detail
+        # (both workspace-wide). Without this branch a member sees "Total
+        # Spent: 70 hr" on the detail page while the list shows 131 hr.
+        project_id_param = request.query_params.get('project_id')
+        project_id_int = None
+        project_scope_full = False
+        if project_id_param:
+            try:
+                project_id_int = int(project_id_param)
+            except (TypeError, ValueError):
+                project_id_int = None
+        if project_id_int is not None:
+            if request.user.role in ('owner', 'admin'):
+                project_scope_full = True
+            else:
+                project_scope_full = ProjectMembership.objects.filter(
+                    project_id=project_id_int,
+                    user_id=request.user.id,
+                ).exists()
+
+        if project_scope_full:
+            qs = TimeEntry.objects.filter(account_id=request.user.account_id)
+        else:
+            qs = _scope_qs_for_user(request.user)
+        qs = qs.filter(date__gte=start, date__lte=end).select_related(
+            'user', 'project__client', 'project_task__task',
         )
 
         active_only = request.query_params.get('active_only')
@@ -313,12 +337,8 @@ class TimeReportView(APIView):
             except (TypeError, ValueError):
                 pass
 
-        project_id_param = request.query_params.get('project_id')
-        if project_id_param:
-            try:
-                qs = qs.filter(project_id=int(project_id_param))
-            except (TypeError, ValueError):
-                pass
+        if project_id_int is not None:
+            qs = qs.filter(project_id=project_id_int)
 
         # Pre-fetch project membership rate overrides so per-row billable amounts
         # use the same resolution Profitability uses.
@@ -697,7 +717,10 @@ class ActivityLogReportView(APIView):
                 account_id=user.account_id,
                 created_at__date__gte=start,
                 created_at__date__lte=end,
-            ).select_related('client').order_by('-created_at')[:100]
+            ).select_related('client')
+            if user.role not in ('owner', 'admin'):
+                proj_qs = proj_qs.filter(memberships__user=user).distinct()
+            proj_qs = proj_qs.order_by('-created_at')[:100]
             for p in proj_qs:
                 events.append({
                     'id': f'prj-{p.id}',
