@@ -2,12 +2,19 @@
 #
 # Registers a "KlokView Time Tracking" panel inside every Jira issue.
 # The panel renders with @forge/react on the client; data fetching happens
-# server-side via the resolver function in src/resolvers/index.js, which
-# calls the KlokView Django backend (apps/integrations/jira_views.py).
+# server-side via the resolver function in src/resolvers.js, which calls the
+# KlokView Django backend (apps/integrations/jira_views.py).
 #
 # Workflow:
-#   Local dev:   forge tunnel    (rewrites api.klokview.dev → localhost:8000)
-#   Production:  forge deploy && forge install --site <yoursite>.atlassian.net
+#   Local dev:    forge variables set --environment development KLOKVIEW_BACKEND_URL <prod-url>
+#                 forge variables set --environment development KLOKVIEW_WEB_URL     <prod-or-localhost-tunnel>
+#                 forge variables set --environment development --encrypt KLOKVIEW_API_KEY <dev-secret>
+#                 forge tunnel
+#   Production:   forge variables set --environment production KLOKVIEW_BACKEND_URL <prod-url>
+#                 forge variables set --environment production KLOKVIEW_WEB_URL     <prod-url>
+#                 forge variables set --environment production --encrypt KLOKVIEW_API_KEY <prod-secret>
+#                 forge deploy --environment production
+#                 (then submit to Atlassian Marketplace as a private listing — see README)
 
 modules:
   # Primary entry point — clickable "Open KlokView" label in the issue Details
@@ -51,18 +58,24 @@ app:
   id: ari:cloud:ecosystem::app/26b4d13e-82a2-4e4c-a93f-34cddfdab857
   runtime:
     name: nodejs22.x
+  # Marketplace listing metadata. The vendor name + support email appear on
+  # the listing page; bump `version` on every `forge deploy --environment
+  # production` that you intend to publish.
+  name: KlokView Time Tracking
+  description: Track time directly from Jira issues — start/stop timers, log against KlokView projects, and view your team's logged hours per issue.
 
 permissions:
-  # Forge external fetch must be HTTPS. For local dev, `forge tunnel`
-  # rewrites this URL → http://localhost:8000 transparently. Replace with
-  # your real production URL when deploying.
+  # Forge external fetch must be HTTPS and listed at build time — env vars
+  # CANNOT inject these. List every host the resolver may ever call. For
+  # local dev `forge tunnel` rewrites the production URL → localhost:8000
+  # transparently, so a single production entry is enough for both envs.
   external:
     fetch:
       backend:
-        # Dev URL — `cloudflared tunnel --url http://localhost:8000` gives a
-        # fresh https URL each restart. Update both this list AND
-        # src/resolvers.js when it changes, then run `forge deploy`.
-        - https://falls-angela-iii-anticipated.trycloudflare.com
+        # PRODUCTION KlokView backend. Replace with your real public HTTPS
+        # URL before `forge deploy`. The `.invalid` placeholder will block
+        # all backend calls until you swap it.
+        - https://api.klokview.invalid
   scopes:
     - read:jira-work
     - read:jira-user

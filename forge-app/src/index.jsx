@@ -29,12 +29,16 @@ import ForgeReconciler, {
 } from '@forge/react';
 import { invoke, view } from '@forge/bridge';
 
-// Match this to the deployed KlokView web URL when going to prod.
-const KLOKVIEW_WEB_URL = 'http://localhost:5173';
+// Web URL is resolved at runtime from Forge environment variables (set via
+// `forge variables set --environment <env> KLOKVIEW_WEB_URL <url>`). The
+// resolver returns it from `bootstrap`, so the panel always uses the URL
+// appropriate to the deployed environment — no rebuild required to change it.
+const FALLBACK_WEB_URL = 'https://app.klokview.invalid';
 
 const App = () => {
   const [issueKey, setIssueKey] = useState('');
   const [defaultUserName, setDefaultUserName] = useState(null);
+  const [webUrl, setWebUrl] = useState(FALLBACK_WEB_URL);
 
   // Data
   const [projects, setProjects] = useState([]);
@@ -117,6 +121,9 @@ const App = () => {
         const boot = await invoke('bootstrap').catch(() => null);
         if (boot && boot.default_user_name) {
           setDefaultUserName(boot.default_user_name);
+        }
+        if (boot && boot.web_url) {
+          setWebUrl(boot.web_url);
         }
 
         await refresh(key);
@@ -223,7 +230,7 @@ const App = () => {
             <Text size="small">Logging as {defaultUserName}</Text>
           ) : null}
         </Inline>
-        <Link href={`${KLOKVIEW_WEB_URL}/time`} openNewTab>
+        <Link href={`${webUrl}/time`} openNewTab>
           Open in KlokView →
         </Link>
       </Stack>

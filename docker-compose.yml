@@ -4,18 +4,86 @@ services:
     container_name: trackflow-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: trackflow_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${DB_NAME:-trackflow_db}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     ports:
-      - "5432:5432"
+      - "${DB_PORT_HOST:-5432}:5432"
     volumes:
       - trackflow_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d trackflow_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-trackflow_db}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: trackflow-backend:latest
+    container_name: trackflow-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set in .env}
+      DEBUG: ${DEBUG:-False}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend,frontend}
+      DB_ENGINE: postgres
+      DB_NAME: ${DB_NAME:-trackflow_db}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: db
+      DB_PORT: 5432
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,http://localhost:8080,http://127.0.0.1:8080}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      # Email (leave blank to use console backend)
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-TrackFlow <no-reply@trackflow.local>}
+      # Microsoft / Outlook integration (optional)
+      MS_CLIENT_ID: ${MS_CLIENT_ID:-}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
+      MS_TENANT: ${MS_TENANT:-common}
+      MS_REDIRECT_URI: ${MS_REDIRECT_URI:-}
+      MS_SSO_REDIRECT_URI: ${MS_SSO_REDIRECT_URI:-}
+      # Jira Forge App shared secret — must match KLOKVIEW_API_KEY set on the
+      # Forge side via `forge variables set --encrypt`. Leave blank for local
+      # dev (backend falls open); REQUIRED for any public deployment.
+      JIRA_FORGE_API_KEY: ${JIRA_FORGE_API_KEY:-}
+      JIRA_DEFAULT_USER_EMAIL: ${JIRA_DEFAULT_USER_EMAIL:-}
+    volumes:
+      - trackflow_media:/app/media
+      - trackflow_static:/app/staticfiles
+    ports:
+      - "${BACKEND_PORT_HOST:-8000}:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # In single-host deploys leave this as /api/v1 so the SPA hits nginx
+        # which proxies to the backend on the internal Docker network.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    image: trackflow-frontend:latest
+    container_name: trackflow-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    volumes:
+      - trackflow_static:/var/www/static:ro
+      - trackflow_media:/var/www/media:ro
+    ports:
+      - "${FRONTEND_PORT_HOST:-8080}:80"
+
 volumes:
   trackflow_pgdata:
+  trackflow_media:
+  trackflow_static:

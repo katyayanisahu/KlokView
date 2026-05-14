@@ -1,0 +1,25 @@
+node_modules/
+dist/
+.vite/
+
+# Local secrets — pass VITE_API_BASE_URL via --build-arg instead
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# TS build info
+*.tsbuildinfo

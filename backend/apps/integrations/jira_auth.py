@@ -1,15 +1,26 @@
 """DRF authentication for inbound calls from the TrackFlow Jira Forge App.
 
-Atlassian Connect / Forge sends a JWT signed with the `sharedSecret` we
-received during the install lifecycle. We verify the signature, look up the
-matching `JiraConnection`, and stash it on `request.auth` so views can read
-the calling Jira site's identity without re-querying.
+Two auth flavors live here:
+
+1. `JiraJWTAuthentication` — legacy Atlassian Connect path. Verifies the
+   HS256 JWT signed with the `sharedSecret` we received during the install
+   lifecycle. Kept for completeness; pure Forge apps don't use this.
+
+2. `JiraForgeAPIKeyAuthentication` — the production path for our Forge app.
+   The Forge resolver attaches `Authorization: Bearer <shared-secret>` to every
+   backend call; we compare it to `JIRA_FORGE_API_KEY` env var. The shared
+   secret is set as an *encrypted* Forge variable (`forge variables set
+   --encrypt KLOKVIEW_API_KEY ...`) so only the deployed app artifact and the
+   backend know it.
 
 See Doc 2 §13 — "Security: JWT Verification with Django".
 """
 from __future__ import annotations
 
+import hmac
+
 import jwt
+from decouple import config as env
 from rest_framework import authentication, exceptions
 
 from .models import JiraConnection
@@ -70,6 +81,47 @@ class JiraJWTAuthentication(authentication.BaseAuthentication):
             raise exceptions.AuthenticationFailed(f'Jira JWT rejected: {exc}')
 
         return (None, conn)
+
+    def authenticate_header(self, request):
+        return self.keyword
+
+
+class JiraForgeAPIKeyAuthentication(authentication.BaseAuthentication):
+    """Authenticate Forge → Django requests via shared Bearer token.
+
+    The Forge app reads `KLOKVIEW_API_KEY` (encrypted Forge variable) and sends
+    it as `Authorization: Bearer <key>`. We compare it constant-time against
+    `JIRA_FORGE_API_KEY` (Django env). When the env var is empty we *fall open*
+    — i.e. accept the request without requiring auth — so local dev with
+    `forge tunnel` (no Forge variable set) keeps working. In production set the
+    env var and the auth is enforced.
+
+    On success we don't bind a Django user (Forge calls aren't user-scoped at
+    this layer — `_resolve_effective_user` does that later via `jira_email`).
+    We just return `(None, None)` to let DRF proceed.
+    """
+
+    keyword = 'Bearer'
+
+    def authenticate(self, request):
+        expected = env('JIRA_FORGE_API_KEY', default='', cast=str).strip()
+        header = request.META.get('HTTP_AUTHORIZATION', '')
+
+        if not expected:
+            # Dev mode — auth not configured on this backend, let request through.
+            # Marketplace-distributed prod must set JIRA_FORGE_API_KEY.
+            return None
+
+        if not header.startswith(f'{self.keyword} '):
+            raise exceptions.AuthenticationFailed(
+                'Missing Authorization: Bearer header from Forge app.'
+            )
+
+        provided = header[len(self.keyword) + 1:].strip()
+        if not provided or not hmac.compare_digest(provided, expected):
+            raise exceptions.AuthenticationFailed('Invalid Forge API key.')
+
+        return (None, None)
 
     def authenticate_header(self, request):
         return self.keyword

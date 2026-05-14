@@ -1,0 +1,7 @@
+# Force LF on shell scripts and Docker assets so Linux containers can exec them
+# even when checked out on Windows.
+*.sh           text eol=lf
+Dockerfile     text eol=lf
+*.Dockerfile   text eol=lf
+nginx.conf     text eol=lf
+entrypoint.sh  text eol=lf

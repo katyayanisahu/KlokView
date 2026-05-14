@@ -15,14 +15,30 @@
 import Resolver from '@forge/resolver';
 import api, { route } from '@forge/api';
 
-// Dev URL via Cloudflare Tunnel — `./cloudflared.exe tunnel --url http://localhost:8000`.
-// Replace with your real deployed Django URL for production. Must also be
-// listed in manifest.yml `permissions.external.fetch.backend`.
-const KLOKVIEW_BACKEND = 'https://falls-angela-iii-anticipated.trycloudflare.com';
+// Backend + web URLs come from Forge environment variables — set per env via:
+//   forge variables set --environment production KLOKVIEW_BACKEND_URL https://api.klokview.com
+//   forge variables set --environment production KLOKVIEW_WEB_URL     https://app.klokview.com
+//   forge variables set --environment production --encrypt KLOKVIEW_API_KEY <shared-secret>
+//
+// For local dev: `forge tunnel` rewrites the prod URL → localhost:8000 transparently,
+// so the dev workflow is unchanged — just set dev-env variables once with:
+//   forge variables set --environment development KLOKVIEW_BACKEND_URL https://api.klokview.com
+//   forge variables set --environment development --encrypt KLOKVIEW_API_KEY <dev-secret>
+//
+// The fallback values below are used ONLY if no Forge variable is set — keep them
+// pointing at a placeholder so a misconfigured deploy fails loudly instead of
+// silently talking to the wrong host.
+const KLOKVIEW_BACKEND = process.env.KLOKVIEW_BACKEND_URL || 'https://api.klokview.invalid';
+const KLOKVIEW_WEB = process.env.KLOKVIEW_WEB_URL || 'https://app.klokview.invalid';
+const KLOKVIEW_API_KEY = process.env.KLOKVIEW_API_KEY || '';
 
 const standardHeaders = {
   'Content-Type': 'application/json',
   'User-Agent': 'KlokViewForge/1.0',
+  // Shared-secret auth between the Forge app and the Django backend. The
+  // backend rejects calls whose key doesn't match `JIRA_FORGE_API_KEY` env var,
+  // so even if the backend URL leaks, random callers can't hit /jira/start/ etc.
+  ...(KLOKVIEW_API_KEY ? { Authorization: `Bearer ${KLOKVIEW_API_KEY}` } : {}),
 };
 
 const resolver = new Resolver();
@@ -95,7 +111,11 @@ resolver.define('bootstrap', async ({ context }) => {
     if (!res.ok) {
       return { connected: false, error: `Bootstrap failed: HTTP ${res.status}` };
     }
-    return await res.json();
+    const data = await res.json();
+    // The panel needs to know which KlokView web URL to deep-link to. The
+    // resolver is the only place with access to Forge environment variables,
+    // so we surface it here once and the UI keeps it across renders.
+    return { ...data, web_url: KLOKVIEW_WEB };
   } catch (e) {
     return { connected: false, error: String(e) };
   }

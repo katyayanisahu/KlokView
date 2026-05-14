@@ -110,11 +110,14 @@ export default function SettingsIntegrationsPage() {
   // ---- Jira handlers ----
 
   const openJiraMarketplace = () => {
-    window.open(
-      'https://marketplace.atlassian.com/search?product=jira&query=klokview',
-      '_blank',
-      'noopener,noreferrer',
-    );
+    // KlokView ships as a *private* Marketplace listing — the URL is given to
+    // approved Jira sites only and is not discoverable via marketplace search.
+    // Override at build time with VITE_JIRA_PRIVATE_LISTING_URL; the fallback
+    // points at the marketplace homepage so the button never lands on a 404.
+    const url =
+      (import.meta.env.VITE_JIRA_PRIVATE_LISTING_URL as string | undefined) ||
+      'https://marketplace.atlassian.com/';
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   const handleJiraClaim = async () => {

@@ -54,7 +54,7 @@ def _pick_default_user():
         or User.objects.filter(role='admin').order_by('id').first()
     )
 
-from .jira_auth import JiraJWTAuthentication
+from .jira_auth import JiraForgeAPIKeyAuthentication, JiraJWTAuthentication
 from .models import JiraConnection
 
 
@@ -184,7 +184,7 @@ class JiraEntriesView(APIView):
     cloud_id is absent (dev convenience).
     """
 
-    authentication_classes = []
+    authentication_classes = [JiraForgeAPIKeyAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -217,7 +217,7 @@ class JiraProjectsView(APIView):
     when set, so users see only projects they're on.
     """
 
-    authentication_classes = []
+    authentication_classes = [JiraForgeAPIKeyAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -281,7 +281,7 @@ class JiraStartView(APIView):
     connection's `default_user` — override by passing `trackflow_user_id`.
     """
 
-    authentication_classes = [JiraJWTAuthentication]
+    authentication_classes = [JiraJWTAuthentication, JiraForgeAPIKeyAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -364,7 +364,7 @@ class JiraStopView(APIView):
     either Atlassian JWT (production) or cloud_id (dev) for auth.
     """
 
-    authentication_classes = [JiraJWTAuthentication]
+    authentication_classes = [JiraJWTAuthentication, JiraForgeAPIKeyAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -501,7 +501,7 @@ class JiraClaimView(APIView):
 
 @csrf_exempt
 @api_view(['POST'])
-@authentication_classes([])
+@authentication_classes([JiraForgeAPIKeyAuthentication])
 @permission_classes([AllowAny])
 def jira_bootstrap(request):
     """POST /api/v1/integrations/jira/bootstrap/
