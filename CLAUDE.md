@@ -104,7 +104,7 @@ UI follows Harvest pattern (Day + Week views, underlined tabs). Project list / d
 **Period dropdown (Day / Week / Custom):** Top-right of the Timesheet replaces the old Day/Week pill toggle. Day/Week behave as before. **Custom** swaps the prev/next/calendar with two date inputs and renders a flat chronological list of entries across the range (with date label per row, internal scroll at `max-h-[640px]`). Week strip, rejected banner, and submit-week row are hidden in Custom view since they're week-anchored. Dropdown tints `primary-soft` when not on default `Day` to flag a non-default selection.
 
 ### ✅ Epic 3 — Projects (Done)
-
+    //comment
 All UI + CRUD live. Budget bars and Hours columns read real `TimeEntry` aggregates.
 
 | Story | Status |
