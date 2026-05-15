@@ -87,7 +87,7 @@
 
 **Foundation also built:** tenant model (`Account`), JWT, role-aware sidebar nav, route guards (`ProtectedRoute` / `RequireRole` / `RequireModule`), Techment-inspired design system, `start-dev.bat` one-click launcher.
 
-### ✅ Epic 2 — Time Entries (done)
+### ✅ Epic 2 — Time Entries (Done)
 
 | Story | Status |
 |---|---|
